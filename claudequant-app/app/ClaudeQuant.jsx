@@ -6,7 +6,7 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   AreaChart, Area
 } from "recharts";
-import { Upload, ChevronDown, ChevronRight, X, ArrowRight, ArrowUp, Database, BarChart2, TrendingUp, Activity, Search, FileText, Zap, PanelLeft, Plus, MoreHorizontal, Square } from "lucide-react";
+import { Upload, ChevronDown, ChevronRight, X, ArrowRight, ArrowUp, Database, BarChart2, TrendingUp, Activity, Search, FileText, Zap, PanelLeft, Plus, MoreHorizontal, Square, MessageSquare } from "lucide-react";
 import * as Papa from "papaparse";
 
 // ─── Design System (extracted from Claude/Cowork) ───────────────────────────
@@ -50,6 +50,142 @@ const StreamingDots = () => (
     <style>{`@keyframes pulse { 0%, 80%, 100% { opacity: 0.3; transform: scale(0.8); } 40% { opacity: 1; transform: scale(1); } }`}</style>
   </span>
 );
+
+// ─── Question parser: extracts [QUESTION] blocks from Claude's response ─────
+function parseMessageContent(text) {
+  if (!text) return { segments: [], hasQuestions: false };
+  const segments = [];
+  const regex = /\[QUESTION\]\s*([\s\S]*?)\s*\[\/QUESTION\]/g;
+  let lastIndex = 0;
+  let match;
+  let hasQuestions = false;
+
+  while ((match = regex.exec(text)) !== null) {
+    hasQuestions = true;
+    // Text before the question block
+    if (match.index > lastIndex) {
+      const before = text.slice(lastIndex, match.index).trim();
+      if (before) segments.push({ type: "text", content: before });
+    }
+    // Parse the question block
+    const block = match[1];
+    const titleMatch = block.match(/title:\s*(.+)/);
+    const descMatch = block.match(/description:\s*(.+)/);
+    const optionsRaw = block.match(/options:\s*([\s\S]*)/);
+    const options = [];
+    if (optionsRaw) {
+      const lines = optionsRaw[1].split("\n").map(l => l.trim()).filter(l => l.startsWith("- "));
+      for (const line of lines) {
+        const parts = line.slice(2).split("|").map(s => s.trim());
+        options.push({ label: parts[0], description: parts[1] || "" });
+      }
+    }
+    segments.push({
+      type: "question",
+      title: titleMatch ? titleMatch[1].trim() : "Question",
+      description: descMatch ? descMatch[1].trim() : "",
+      options,
+    });
+    lastIndex = regex.lastIndex;
+  }
+
+  // Remaining text after last question
+  if (lastIndex < text.length) {
+    const remaining = text.slice(lastIndex).trim();
+    if (remaining) segments.push({ type: "text", content: remaining });
+  }
+
+  // If no questions found, return the whole text as a single segment
+  if (!hasQuestions) {
+    segments.push({ type: "text", content: text });
+  }
+
+  return { segments, hasQuestions };
+}
+
+// ─── QuestionCard component ─────────────────────────────────────────────────
+const QuestionCard = ({ question, onSelect, disabled }) => {
+  const [showFreeText, setShowFreeText] = useState(false);
+  const [freeText, setFreeText] = useState("");
+
+  return (
+    <div style={{
+      background: C.bgComposer, borderRadius: 14, border: `0.5px solid ${C.border}`,
+      padding: "18px 20px", marginTop: 12, marginBottom: 8, boxShadow: C.shadowSoft,
+    }}>
+      <div style={{ fontSize: 14, fontWeight: 500, color: C.text, marginBottom: 4, fontFamily: C.sans }}>
+        {question.title}
+      </div>
+      {question.description && (
+        <div style={{ fontSize: 12, color: C.textMuted, marginBottom: 14, lineHeight: 1.4, fontFamily: C.sans }}>
+          {question.description}
+        </div>
+      )}
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        {question.options.map((opt, i) => (
+          <button key={i} onClick={() => !disabled && onSelect(`${opt.label}${opt.description ? ': ' + opt.description : ''}`)}
+            disabled={disabled}
+            style={{
+              display: "flex", alignItems: "center", gap: 10, padding: "10px 14px",
+              borderRadius: 10, border: `0.5px solid ${C.border}`, background: C.bg,
+              cursor: disabled ? "default" : "pointer", textAlign: "left",
+              transition: "all 0.15s", fontFamily: C.sans, opacity: disabled ? 0.5 : 1,
+            }}
+            onMouseOver={e => { if (!disabled) { e.currentTarget.style.borderColor = "rgba(222,220,209,0.35)"; e.currentTarget.style.background = C.bgHover; }}}
+            onMouseOut={e => { e.currentTarget.style.borderColor = C.border; e.currentTarget.style.background = C.bg; }}>
+            <div style={{
+              width: 6, height: 6, borderRadius: "50%", background: C.accent,
+              flexShrink: 0, opacity: 0.7,
+            }} />
+            <div>
+              <div style={{ color: C.text, fontSize: 13, fontWeight: 500 }}>{opt.label}</div>
+              {opt.description && <div style={{ color: C.textMuted, fontSize: 11, marginTop: 1 }}>{opt.description}</div>}
+            </div>
+          </button>
+        ))}
+        {/* Free text option */}
+        {!showFreeText ? (
+          <button onClick={() => !disabled && setShowFreeText(true)}
+            disabled={disabled}
+            style={{
+              display: "flex", alignItems: "center", gap: 10, padding: "10px 14px",
+              borderRadius: 10, border: `0.5px dashed ${C.border}`, background: "transparent",
+              cursor: disabled ? "default" : "pointer", textAlign: "left",
+              transition: "all 0.15s", fontFamily: C.sans, opacity: disabled ? 0.5 : 1,
+            }}
+            onMouseOver={e => { if (!disabled) e.currentTarget.style.borderColor = "rgba(222,220,209,0.35)"; }}
+            onMouseOut={e => { e.currentTarget.style.borderColor = C.border; }}>
+            <MessageSquare size={13} color={C.textMuted} style={{ flexShrink: 0 }} />
+            <div style={{ color: C.textMuted, fontSize: 13 }}>Something else...</div>
+          </button>
+        ) : (
+          <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
+            <input value={freeText} onChange={e => setFreeText(e.target.value)}
+              onKeyDown={e => { if (e.key === "Enter" && freeText.trim()) { onSelect(freeText.trim()); setFreeText(""); setShowFreeText(false); }}}
+              placeholder="Type your answer..."
+              autoFocus
+              style={{
+                flex: 1, padding: "10px 14px", borderRadius: 10, border: `0.5px solid ${C.border}`,
+                background: C.bg, color: C.text, fontSize: 13, fontFamily: C.sans,
+                outline: "none",
+              }} />
+            <button onClick={() => { if (freeText.trim()) { onSelect(freeText.trim()); setFreeText(""); setShowFreeText(false); }}}
+              disabled={!freeText.trim()}
+              style={{
+                padding: "10px 16px", borderRadius: 10, border: "none",
+                background: freeText.trim() ? C.accent : C.bgHover,
+                color: freeText.trim() ? "#fff" : C.textMuted,
+                cursor: freeText.trim() ? "pointer" : "default",
+                fontSize: 13, fontFamily: C.sans, fontWeight: 500, flexShrink: 0,
+              }}>
+              Send
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
 
 // ─── Seeded PRNG ────────────────────────────────────────────────────────────
 const prng = (s) => { let seed = s; return () => { seed = (seed * 16807) % 2147483647; return (seed - 1) / 2147483646; }; };
@@ -825,11 +961,43 @@ export default function ClaudeQuant() {
                           <div style={{ fontSize: 14, lineHeight: 1.6, color: C.text, fontFamily: C.serif }}>{msg.text}</div>
                         </div>
                       </div>
-                    ) : (
+                    ) : (() => {
+                      const parsed = !msg.isStreaming ? parseMessageContent(msg.text) : { segments: [], hasQuestions: false };
+                      const isLastMsg = i === messages.length - 1;
+                      const questionsAnswered = msg.answered;
+                      return (
                       <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
                         <div style={{ flexShrink: 0, marginTop: 3 }}><ClaudeLogo size={18} /></div>
                         <div style={{ flex: 1, minWidth: 0 }}>
-                          {msg.text && <div style={{ fontSize: 14, lineHeight: 1.7, color: C.textSec, whiteSpace: "pre-wrap", fontFamily: C.serif }}>{renderText(msg.text)}{msg.isStreaming && <StreamingDots />}</div>}
+                          {/* If streaming or no questions, render text normally */}
+                          {(msg.isStreaming || !parsed.hasQuestions) && msg.text && (
+                            <div style={{ fontSize: 14, lineHeight: 1.7, color: C.textSec, whiteSpace: "pre-wrap", fontFamily: C.serif }}>
+                              {renderText(msg.text)}{msg.isStreaming && <StreamingDots />}
+                            </div>
+                          )}
+                          {/* If done streaming and has questions, render structured segments */}
+                          {!msg.isStreaming && parsed.hasQuestions && parsed.segments.map((seg, si) => (
+                            seg.type === "text" ? (
+                              <div key={si} style={{ fontSize: 14, lineHeight: 1.7, color: C.textSec, whiteSpace: "pre-wrap", fontFamily: C.serif, marginBottom: 4 }}>
+                                {renderText(seg.content)}
+                              </div>
+                            ) : (
+                              <QuestionCard key={si} question={seg}
+                                disabled={questionsAnswered || !isLastMsg || isStreaming}
+                                onSelect={(answer) => {
+                                  // Mark this message's questions as answered
+                                  setMessages(prev => {
+                                    const updated = [...prev];
+                                    updated[i] = { ...updated[i], answered: true };
+                                    return updated;
+                                  });
+                                  // Send the answer with the question title for context
+                                  const answerText = `${seg.title}: ${answer}`;
+                                  streamMessage(answerText, messages);
+                                }}
+                              />
+                            )
+                          ))}
                           {!msg.text && msg.isStreaming && <div style={{ fontSize: 14, color: C.textMuted }}><StreamingDots /></div>}
                           {msg.isError && <div style={{ color: C.red, fontSize: 12, marginTop: 4 }}>Error occurred</div>}
                           {msg.table && <div style={{ overflowX: "auto", marginTop: 14, background: C.bgComposer, borderRadius: 12, boxShadow: C.shadowSoft, padding: "4px 0" }}><table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}><thead><tr>{msg.table.headers.map((h,j) => <th key={j} style={{ padding: "10px 14px", textAlign: j===0?"left":"right", color: C.textMuted, borderBottom: `1px solid ${C.border}`, fontWeight: 500, fontFamily: C.sans, fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5 }}>{h}</th>)}</tr></thead><tbody>{msg.table.rows.map((row,j) => <tr key={j}>{row.map((cell,k) => <td key={k} style={{ padding: "8px 14px", textAlign: k===0?"left":"right", color: k===0?C.text:C.textSec, fontFamily: k>0?C.mono:C.sans, fontSize: 12, borderBottom: j<msg.table.rows.length-1?`1px solid rgba(222,220,209,0.06)`:"none" }}>{cell}</td>)}</tr>)}</tbody></table></div>}
@@ -838,7 +1006,8 @@ export default function ClaudeQuant() {
                           {msg.suggestions && !msg.isStreaming && <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 14 }}>{msg.suggestions.map((s,j) => <button key={j} onClick={() => processQuery(s)} style={{ padding: "6px 14px", borderRadius: 8, border: `0.5px solid ${C.border}`, background: C.bg, color: C.textSec, fontSize: 12, cursor: "pointer", fontFamily: C.sans }} onMouseOver={e => {e.currentTarget.style.borderColor="rgba(222,220,209,0.35)";e.currentTarget.style.color=C.text;}} onMouseOut={e => {e.currentTarget.style.borderColor=C.border;e.currentTarget.style.color=C.textSec;}}>{s}</button>)}</div>}
                         </div>
                       </div>
-                    )}
+                      );
+                    })()}
                   </div>
                 ))}
               </div>

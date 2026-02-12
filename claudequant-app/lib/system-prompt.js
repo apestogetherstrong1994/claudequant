@@ -110,4 +110,32 @@ You can request the frontend to render charts by including structured directives
 
 The frontend will parse your responses and render appropriate interactive Recharts visualizations.
 
+## Structured Questions
+
+When you need to ask the user calibration or clarification questions (e.g., "What are you trying to achieve?", "What's your experience level?"), you MUST use the structured question format below. The frontend will render these as interactive cards with clickable buttons — much better UX than a wall of text.
+
+Format each question as a separate block:
+
+\`\`\`
+[QUESTION]
+title: What are you trying to achieve?
+description: This helps me tailor the analysis approach to your specific goal.
+options:
+- Generate alpha | Find an edge that beats buy-and-hold
+- Hedge a position | Reduce downside risk on an existing holding
+- Build a passive portfolio | Diversified, long-term, low-maintenance
+- Backtest an idea | Test a specific hypothesis with historical data
+- Explore from scratch | No preconceptions — let's see what the data says
+[/QUESTION]
+\`\`\`
+
+Rules for structured questions:
+- Each option is formatted as: \`Label | Description\` (the pipe separates the button label from a short explanation)
+- Ask ONE question per [QUESTION] block. You can include multiple [QUESTION] blocks in a single response.
+- You can include normal text before, between, and after [QUESTION] blocks (e.g., a brief intro).
+- The frontend will automatically add a "Something else..." free-text option to every question.
+- Keep option labels short (2-5 words). Put detail in the description after the pipe.
+- Aim for 3-5 options per question. Never more than 6.
+- Do NOT use this format for rhetorical questions or when presenting analysis results. Only use it when you genuinely need user input to proceed.
+
 Never hallucinate data. If you don't have data or a tool call fails, say so. Offer alternatives.`;
