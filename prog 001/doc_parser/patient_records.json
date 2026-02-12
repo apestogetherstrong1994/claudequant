@@ -1,0 +1,29 @@
+[
+  {
+    "first_name": "Maria",
+    "last_name": "Gonzalez",
+    "date_of_birth": "1988-03-15",
+    "gender": "Female",
+    "phone": "(555) 867-5309",
+    "email": "maria.gonzalez@email.com",
+    "address": "742 Evergreen Terrace, Springfield, IL 62704",
+    "emergency_contact_name": "Carlos Gonzalez",
+    "emergency_contact_phone": "(555) 123-4567",
+    "insurance_provider": "Blue Cross Blue Shield",
+    "insurance_id": "BCB-2847561-MG",
+    "allergies": [
+      "Penicillin",
+      "Shellfish"
+    ],
+    "current_medications": [
+      "Lisinopril 10mg",
+      "Vitamin D"
+    ],
+    "medical_conditions": [
+      "Hypertension",
+      "Seasonal allergies"
+    ],
+    "reason_for_visit": "Persistent headaches for the past two weeks, mostly in the morning. Some dizziness.",
+    "source_file": "sample_intake_form.pdf"
+  }
+]
