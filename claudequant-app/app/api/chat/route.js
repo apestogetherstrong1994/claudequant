@@ -48,7 +48,7 @@ export async function POST(request) {
 
     // Stream the response using the Anthropic SDK
     const stream = await client.messages.stream({
-      model: "claude-opus-4-6-20250929",
+      model: "claude-opus-4-5-20251101",
       max_tokens: 4096,
       system: SYSTEM_PROMPT,
       messages: formattedMessages,
