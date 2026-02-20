@@ -51,20 +51,33 @@ const StreamingDots = () => (
   </span>
 );
 
+// ─── Pre-clean: strip code fences that wrap [QUESTION] blocks ────────────────
+function preCleanQuestionText(text) {
+  if (!text) return text;
+  // Remove code fences (```) that appear right before [QUESTION] or right after [/QUESTION]
+  let clean = text.replace(/```\s*\n?\s*\[QUESTION\]/g, '[QUESTION]');
+  clean = clean.replace(/\[\/QUESTION\]\s*\n?\s*```/g, '[/QUESTION]');
+  // Also handle case where entire block is inside a code fence
+  clean = clean.replace(/```[\s\S]*?\[QUESTION\]/g, '[QUESTION]');
+  return clean;
+}
+
 // ─── Question parser: extracts [QUESTION] blocks from Claude's response ─────
 function parseMessageContent(text) {
   if (!text) return { segments: [], hasQuestions: false };
+  // Pre-clean code fences that wrap question blocks
+  const cleaned = preCleanQuestionText(text);
   const segments = [];
   const regex = /\[QUESTION\]\s*([\s\S]*?)\s*\[\/QUESTION\]/g;
   let lastIndex = 0;
   let match;
   let hasQuestions = false;
 
-  while ((match = regex.exec(text)) !== null) {
+  while ((match = regex.exec(cleaned)) !== null) {
     hasQuestions = true;
     // Text before the question block
     if (match.index > lastIndex) {
-      const before = text.slice(lastIndex, match.index).trim();
+      const before = cleaned.slice(lastIndex, match.index).trim();
       if (before) segments.push({ type: "text", content: before });
     }
     // Parse the question block
@@ -90,8 +103,8 @@ function parseMessageContent(text) {
   }
 
   // Remaining text after last question
-  if (lastIndex < text.length) {
-    const remaining = text.slice(lastIndex).trim();
+  if (lastIndex < cleaned.length) {
+    const remaining = cleaned.slice(lastIndex).trim();
     if (remaining) segments.push({ type: "text", content: remaining });
   }
 
@@ -104,18 +117,28 @@ function parseMessageContent(text) {
 }
 
 // ─── Strip [QUESTION] blocks for clean display during streaming ─────────────
+// Simple approach: just show text BEFORE the first [QUESTION tag appears
 function getDisplayText(text) {
   if (!text) return '';
-  // Remove complete [QUESTION]...[/QUESTION] blocks
-  let clean = text.replace(/\[QUESTION\][\s\S]*?\[\/QUESTION\]/g, '');
-  // Remove incomplete [QUESTION] block at end (still streaming)
-  const openIdx = clean.indexOf('[QUESTION]');
-  if (openIdx !== -1) clean = clean.slice(0, openIdx);
-  // Remove partial opening tag at very end (e.g. "[QUEST" mid-stream)
-  clean = clean.replace(/\[Q(?:U(?:E(?:S(?:T(?:I(?:O(?:N(?:\])?)?)?)?)?)?)?)?$/, '');
-  // Clean trailing markdown separators and whitespace
-  clean = clean.replace(/\s*[-]{3,}\s*$/, '').trim();
-  return clean;
+  // Pre-clean code fences around question blocks
+  const cleaned = preCleanQuestionText(text);
+  // Find the first [QUESTION] tag and only show text before it
+  const idx = cleaned.search(/\[QUESTION\]/);
+  if (idx !== -1) {
+    return cleaned.slice(0, idx).replace(/\s*[-]{3,}\s*$/, '').trim();
+  }
+  // Check for partial [QUESTION tag still being streamed (e.g. "[QUEST")
+  const partialIdx = cleaned.search(/\[Q(?:U(?:E(?:S(?:T(?:I(?:O(?:N)?)?)?)?)?)?)?$/);
+  if (partialIdx !== -1) {
+    return cleaned.slice(0, partialIdx).trim();
+  }
+  // Also check for code fence that might precede a [QUESTION] being streamed
+  const fenceIdx = cleaned.search(/```\s*$/);
+  if (fenceIdx !== -1 && cleaned.length - fenceIdx < 10) {
+    // A trailing code fence might be about to wrap a [QUESTION] — strip it
+    return cleaned.slice(0, fenceIdx).trim();
+  }
+  return cleaned;
 }
 
 // ─── QuestionOverlay: replaces the composer, one question at a time ──────────

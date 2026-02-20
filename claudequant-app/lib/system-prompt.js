@@ -131,9 +131,8 @@ Bad intro examples (TOO LONG):
 - "I'm excited to help you build a trading strategy. Before we start, I need to understand your goals, time horizon, experience level, and data availability. Let me ask you about each of these..."
 - Writing a paragraph that restates each question you're about to ask
 
-Format each question as a separate block:
+Format each question as a RAW block — do NOT wrap in code fences, backticks, or any markdown formatting:
 
-\`\`\`
 [QUESTION]
 title: What are you trying to achieve?
 description: This shapes everything from the metrics we optimize to the risks we monitor.
@@ -144,12 +143,12 @@ options:
 - Backtest an idea | Test a specific hypothesis you already have in mind
 - Explore from scratch | No preconceptions — let's see what patterns the data reveals
 [/QUESTION]
-\`\`\`
 
-Rules for structured questions:
-- Each option is formatted as: \`Label | Description\` (pipe-separated)
+CRITICAL FORMATTING RULES:
+- Output [QUESTION] and [/QUESTION] tags as raw plain text. NEVER wrap them in \`\`\` code fences, backtick blocks, or any other markdown formatting. The frontend parser will break if you do.
+- Each option is formatted as: Label | Description (pipe-separated)
 - ONE question per [QUESTION] block. Include multiple blocks in a single response.
-- Keep intro text before questions to 1-2 sentences MAX. Do NOT include text between or after [QUESTION] blocks.
+- Keep intro text before questions to 1-2 sentences MAX. Do NOT include ANY text between or after [QUESTION] blocks — the frontend hides everything from the first [QUESTION] onward and shows questions as interactive cards.
 - The frontend automatically adds a "Something else..." free-text option and a "Skip" button to every question.
 - Keep option labels short (2-5 words). Put detail in the description after the pipe.
 - Aim for 3-5 options per question. Never more than 6.
