@@ -103,40 +103,85 @@ function parseMessageContent(text) {
   return { segments, hasQuestions };
 }
 
-// ─── QuestionCard component ─────────────────────────────────────────────────
-const QuestionCard = ({ question, onSelect, disabled }) => {
+// ─── Strip [QUESTION] blocks for clean display during streaming ─────────────
+function getDisplayText(text) {
+  if (!text) return '';
+  // Remove complete [QUESTION]...[/QUESTION] blocks
+  let clean = text.replace(/\[QUESTION\][\s\S]*?\[\/QUESTION\]/g, '');
+  // Remove incomplete [QUESTION] block at end (still streaming)
+  const openIdx = clean.indexOf('[QUESTION]');
+  if (openIdx !== -1) clean = clean.slice(0, openIdx);
+  // Remove partial opening tag at very end (e.g. "[QUEST" mid-stream)
+  clean = clean.replace(/\[Q(?:U(?:E(?:S(?:T(?:I(?:O(?:N(?:\])?)?)?)?)?)?)?)?$/, '');
+  // Clean trailing markdown separators and whitespace
+  clean = clean.replace(/\s*[-]{3,}\s*$/, '').trim();
+  return clean;
+}
+
+// ─── QuestionOverlay: replaces the composer, one question at a time ──────────
+const QuestionOverlay = ({ question, questionIndex, totalQuestions, onSelect, onSkip }) => {
   const [showFreeText, setShowFreeText] = useState(false);
   const [freeText, setFreeText] = useState("");
 
+  // Reset free text state when question changes
+  useEffect(() => {
+    setShowFreeText(false);
+    setFreeText("");
+  }, [questionIndex]);
+
   return (
     <div style={{
-      background: C.bgComposer, borderRadius: 14, border: `0.5px solid ${C.border}`,
-      padding: "18px 20px", marginTop: 12, marginBottom: 8, boxShadow: C.shadowSoft,
+      background: C.bgComposer, borderRadius: 20, boxShadow: C.shadow,
+      padding: "20px 24px",
     }}>
-      <div style={{ fontSize: 14, fontWeight: 500, color: C.text, marginBottom: 4, fontFamily: C.sans }}>
+      {/* Progress dots + Skip */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+        <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+          {Array.from({ length: totalQuestions }, (_, i) => (
+            <div key={i} style={{
+              width: i === questionIndex ? 24 : 8, height: 3, borderRadius: 2,
+              background: i <= questionIndex ? C.accent : "rgba(222,220,209,0.15)",
+              opacity: i < questionIndex ? 0.4 : 1,
+              transition: "all 0.3s",
+            }} />
+          ))}
+          <span style={{ fontSize: 11, color: C.textMuted, marginLeft: 8, fontFamily: C.sans }}>
+            {questionIndex + 1} of {totalQuestions}
+          </span>
+        </div>
+        <button onClick={onSkip} style={{
+          background: "transparent", border: "none", color: C.textMuted,
+          cursor: "pointer", fontSize: 12, fontFamily: C.sans,
+          padding: "4px 8px", borderRadius: 6,
+        }}
+        onMouseOver={e => e.currentTarget.style.color = C.textSec}
+        onMouseOut={e => e.currentTarget.style.color = C.textMuted}>
+          Skip
+        </button>
+      </div>
+
+      {/* Question title + description */}
+      <div style={{ fontSize: 15, fontWeight: 500, color: C.text, marginBottom: 4, fontFamily: C.sans }}>
         {question.title}
       </div>
       {question.description && (
-        <div style={{ fontSize: 12, color: C.textMuted, marginBottom: 14, lineHeight: 1.4, fontFamily: C.sans }}>
+        <div style={{ fontSize: 13, color: C.textMuted, marginBottom: 16, lineHeight: 1.4, fontFamily: C.sans }}>
           {question.description}
         </div>
       )}
+
+      {/* Options */}
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
         {question.options.map((opt, i) => (
-          <button key={i} onClick={() => !disabled && onSelect(`${opt.label}${opt.description ? ': ' + opt.description : ''}`)}
-            disabled={disabled}
+          <button key={i} onClick={() => onSelect(`${opt.label}${opt.description ? ': ' + opt.description : ''}`)}
             style={{
               display: "flex", alignItems: "center", gap: 10, padding: "10px 14px",
               borderRadius: 10, border: `0.5px solid ${C.border}`, background: C.bg,
-              cursor: disabled ? "default" : "pointer", textAlign: "left",
-              transition: "all 0.15s", fontFamily: C.sans, opacity: disabled ? 0.5 : 1,
+              cursor: "pointer", textAlign: "left", transition: "all 0.15s", fontFamily: C.sans,
             }}
-            onMouseOver={e => { if (!disabled) { e.currentTarget.style.borderColor = "rgba(222,220,209,0.35)"; e.currentTarget.style.background = C.bgHover; }}}
+            onMouseOver={e => { e.currentTarget.style.borderColor = "rgba(222,220,209,0.35)"; e.currentTarget.style.background = C.bgHover; }}
             onMouseOut={e => { e.currentTarget.style.borderColor = C.border; e.currentTarget.style.background = C.bg; }}>
-            <div style={{
-              width: 6, height: 6, borderRadius: "50%", background: C.accent,
-              flexShrink: 0, opacity: 0.7,
-            }} />
+            <div style={{ width: 6, height: 6, borderRadius: "50%", background: C.accent, flexShrink: 0, opacity: 0.7 }} />
             <div>
               <div style={{ color: C.text, fontSize: 13, fontWeight: 500 }}>{opt.label}</div>
               {opt.description && <div style={{ color: C.textMuted, fontSize: 11, marginTop: 1 }}>{opt.description}</div>}
@@ -145,31 +190,28 @@ const QuestionCard = ({ question, onSelect, disabled }) => {
         ))}
         {/* Free text option */}
         {!showFreeText ? (
-          <button onClick={() => !disabled && setShowFreeText(true)}
-            disabled={disabled}
+          <button onClick={() => setShowFreeText(true)}
             style={{
               display: "flex", alignItems: "center", gap: 10, padding: "10px 14px",
               borderRadius: 10, border: `0.5px dashed ${C.border}`, background: "transparent",
-              cursor: disabled ? "default" : "pointer", textAlign: "left",
-              transition: "all 0.15s", fontFamily: C.sans, opacity: disabled ? 0.5 : 1,
+              cursor: "pointer", textAlign: "left", transition: "all 0.15s", fontFamily: C.sans,
             }}
-            onMouseOver={e => { if (!disabled) e.currentTarget.style.borderColor = "rgba(222,220,209,0.35)"; }}
-            onMouseOut={e => { e.currentTarget.style.borderColor = C.border; }}>
+            onMouseOver={e => e.currentTarget.style.borderColor = "rgba(222,220,209,0.35)"}
+            onMouseOut={e => e.currentTarget.style.borderColor = C.border}>
             <MessageSquare size={13} color={C.textMuted} style={{ flexShrink: 0 }} />
             <div style={{ color: C.textMuted, fontSize: 13 }}>Something else...</div>
           </button>
         ) : (
           <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
             <input value={freeText} onChange={e => setFreeText(e.target.value)}
-              onKeyDown={e => { if (e.key === "Enter" && freeText.trim()) { onSelect(freeText.trim()); setFreeText(""); setShowFreeText(false); }}}
+              onKeyDown={e => { if (e.key === "Enter" && freeText.trim()) onSelect(freeText.trim()); }}
               placeholder="Type your answer..."
               autoFocus
               style={{
                 flex: 1, padding: "10px 14px", borderRadius: 10, border: `0.5px solid ${C.border}`,
-                background: C.bg, color: C.text, fontSize: 13, fontFamily: C.sans,
-                outline: "none",
+                background: C.bg, color: C.text, fontSize: 13, fontFamily: C.sans, outline: "none",
               }} />
-            <button onClick={() => { if (freeText.trim()) { onSelect(freeText.trim()); setFreeText(""); setShowFreeText(false); }}}
+            <button onClick={() => { if (freeText.trim()) onSelect(freeText.trim()); }}
               disabled={!freeText.trim()}
               style={{
                 padding: "10px 16px", borderRadius: 10, border: "none",
@@ -418,6 +460,11 @@ export default function ClaudeQuant() {
   const cardsRef = useRef(null);
   const abortRef = useRef(null);
 
+  // Question overlay state: one-at-a-time flow
+  const [pendingQuestions, setPendingQuestions] = useState([]);
+  const [currentQIdx, setCurrentQIdx] = useState(0);
+  const [questionAnswers, setQuestionAnswers] = useState([]);
+
   const numCols = useMemo(() => getNumericCols(data), [data]);
   const allCols = useMemo(() => data?.length ? Object.keys(data[0]) : [], [data]);
 
@@ -506,7 +553,7 @@ export default function ClaudeQuant() {
                 const updated = [...prev];
                 updated[updated.length - 1] = {
                   role: "assistant",
-                  text: fullText,
+                  text: getDisplayText(fullText),
                   content: fullText,
                   isStreaming: true,
                 };
@@ -522,17 +569,27 @@ export default function ClaudeQuant() {
         }
       }
 
-      // Finalize
+      // Finalize: detect questions and set up overlay if present
+      const parsed = parseMessageContent(fullText);
+      const questions = parsed.segments.filter(s => s.type === "question");
+      const displayText = getDisplayText(fullText);
+
       setMessages(prev => {
         const updated = [...prev];
         updated[updated.length - 1] = {
           role: "assistant",
-          text: fullText,
+          text: displayText,
           content: fullText,
           isStreaming: false,
         };
         return updated;
       });
+
+      if (questions.length > 0) {
+        setPendingQuestions(questions);
+        setCurrentQIdx(0);
+        setQuestionAnswers([]);
+      }
     } catch (err) {
       if (err.name === "AbortError") {
         setMessages(prev => {
@@ -565,6 +622,51 @@ export default function ClaudeQuant() {
   const stopStreaming = useCallback(() => {
     abortRef.current?.abort();
   }, []);
+
+  // ── Question overlay handlers: answer or skip, batch all answers ──
+  const handleQuestionAnswer = useCallback((answer) => {
+    const question = pendingQuestions[currentQIdx];
+    const newAnswers = [...questionAnswers, { title: question.title, answer }];
+    setQuestionAnswers(newAnswers);
+
+    if (currentQIdx + 1 < pendingQuestions.length) {
+      setCurrentQIdx(prev => prev + 1);
+    } else {
+      // All questions answered — combine and send as one message
+      const combinedText = newAnswers
+        .filter(a => a.answer !== null)
+        .map(a => `**${a.title}**: ${a.answer}`)
+        .join('\n');
+      setPendingQuestions([]);
+      setCurrentQIdx(0);
+      setQuestionAnswers([]);
+      if (combinedText.trim()) {
+        streamMessage(combinedText, messages);
+      }
+    }
+  }, [pendingQuestions, currentQIdx, questionAnswers, messages, streamMessage]);
+
+  const handleQuestionSkip = useCallback(() => {
+    const newAnswers = [...questionAnswers, { title: pendingQuestions[currentQIdx].title, answer: null }];
+    setQuestionAnswers(newAnswers);
+
+    if (currentQIdx + 1 < pendingQuestions.length) {
+      setCurrentQIdx(prev => prev + 1);
+    } else {
+      // All done — send any non-skipped answers
+      const combinedText = newAnswers
+        .filter(a => a.answer !== null)
+        .map(a => `**${a.title}**: ${a.answer}`)
+        .join('\n');
+      setPendingQuestions([]);
+      setCurrentQIdx(0);
+      setQuestionAnswers([]);
+      if (combinedText.trim()) {
+        streamMessage(combinedText, messages);
+      }
+      // If all skipped, just return to normal composer
+    }
+  }, [pendingQuestions, currentQIdx, questionAnswers, messages, streamMessage]);
 
   // ── Local analysis logic (for CSV data) ──
   const buildInitialAnalysis = (d, name) => {
@@ -961,43 +1063,16 @@ export default function ClaudeQuant() {
                           <div style={{ fontSize: 14, lineHeight: 1.6, color: C.text, fontFamily: C.serif }}>{msg.text}</div>
                         </div>
                       </div>
-                    ) : (() => {
-                      const parsed = !msg.isStreaming ? parseMessageContent(msg.text) : { segments: [], hasQuestions: false };
-                      const isLastMsg = i === messages.length - 1;
-                      const questionsAnswered = msg.answered;
-                      return (
+                    ) : (
                       <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
                         <div style={{ flexShrink: 0, marginTop: 3 }}><ClaudeLogo size={18} /></div>
                         <div style={{ flex: 1, minWidth: 0 }}>
-                          {/* If streaming or no questions, render text normally */}
-                          {(msg.isStreaming || !parsed.hasQuestions) && msg.text && (
+                          {/* Render clean text (questions are stripped and shown as overlay) */}
+                          {msg.text && (
                             <div style={{ fontSize: 14, lineHeight: 1.7, color: C.textSec, whiteSpace: "pre-wrap", fontFamily: C.serif }}>
                               {renderText(msg.text)}{msg.isStreaming && <StreamingDots />}
                             </div>
                           )}
-                          {/* If done streaming and has questions, render structured segments */}
-                          {!msg.isStreaming && parsed.hasQuestions && parsed.segments.map((seg, si) => (
-                            seg.type === "text" ? (
-                              <div key={si} style={{ fontSize: 14, lineHeight: 1.7, color: C.textSec, whiteSpace: "pre-wrap", fontFamily: C.serif, marginBottom: 4 }}>
-                                {renderText(seg.content)}
-                              </div>
-                            ) : (
-                              <QuestionCard key={si} question={seg}
-                                disabled={questionsAnswered || !isLastMsg || isStreaming}
-                                onSelect={(answer) => {
-                                  // Mark this message's questions as answered
-                                  setMessages(prev => {
-                                    const updated = [...prev];
-                                    updated[i] = { ...updated[i], answered: true };
-                                    return updated;
-                                  });
-                                  // Send the answer with the question title for context
-                                  const answerText = `${seg.title}: ${answer}`;
-                                  streamMessage(answerText, messages);
-                                }}
-                              />
-                            )
-                          ))}
                           {!msg.text && msg.isStreaming && <div style={{ fontSize: 14, color: C.textMuted }}><StreamingDots /></div>}
                           {msg.isError && <div style={{ color: C.red, fontSize: 12, marginTop: 4 }}>Error occurred</div>}
                           {msg.table && <div style={{ overflowX: "auto", marginTop: 14, background: C.bgComposer, borderRadius: 12, boxShadow: C.shadowSoft, padding: "4px 0" }}><table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}><thead><tr>{msg.table.headers.map((h,j) => <th key={j} style={{ padding: "10px 14px", textAlign: j===0?"left":"right", color: C.textMuted, borderBottom: `1px solid ${C.border}`, fontWeight: 500, fontFamily: C.sans, fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5 }}>{h}</th>)}</tr></thead><tbody>{msg.table.rows.map((row,j) => <tr key={j}>{row.map((cell,k) => <td key={k} style={{ padding: "8px 14px", textAlign: k===0?"left":"right", color: k===0?C.text:C.textSec, fontFamily: k>0?C.mono:C.sans, fontSize: 12, borderBottom: j<msg.table.rows.length-1?`1px solid rgba(222,220,209,0.06)`:"none" }}>{cell}</td>)}</tr>)}</tbody></table></div>}
@@ -1006,34 +1081,43 @@ export default function ClaudeQuant() {
                           {msg.suggestions && !msg.isStreaming && <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 14 }}>{msg.suggestions.map((s,j) => <button key={j} onClick={() => processQuery(s)} style={{ padding: "6px 14px", borderRadius: 8, border: `0.5px solid ${C.border}`, background: C.bg, color: C.textSec, fontSize: 12, cursor: "pointer", fontFamily: C.sans }} onMouseOver={e => {e.currentTarget.style.borderColor="rgba(222,220,209,0.35)";e.currentTarget.style.color=C.text;}} onMouseOut={e => {e.currentTarget.style.borderColor=C.border;e.currentTarget.style.color=C.textSec;}}>{s}</button>)}</div>}
                         </div>
                       </div>
-                      );
-                    })()}
+                    )}
                   </div>
                 ))}
               </div>
             </div>
 
-            {/* Composer */}
+            {/* Composer / Question Overlay */}
             <div style={{ padding: "12px 32px 20px", flexShrink: 0 }}>
               <div style={{ maxWidth: 720, margin: "0 auto" }}>
-                <form onSubmit={handleSubmit}>
-                  <div style={{ background: C.bgComposer, borderRadius: 20, boxShadow: C.shadow, padding: "4px 4px 4px 18px", display: "flex", alignItems: "center", gap: 8 }}>
-                    <input value={input} onChange={e => setInput(e.target.value)} placeholder={isStreaming ? "Quant is thinking..." : "Ask about your data..."}
-                      disabled={isStreaming}
-                      style={{ flex: 1, background: "transparent", border: "none", outline: "none", color: C.text, fontSize: 14, padding: "10px 0", fontFamily: C.sans, opacity: isStreaming ? 0.5 : 1 }} />
-                    {isStreaming ? (
-                      <button type="button" onClick={stopStreaming}
-                        style={{ width: 36, height: 36, borderRadius: 10, border: "none", background: C.red, color: "#fff", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                        <Square size={14} fill="#fff" />
-                      </button>
-                    ) : (
-                      <button type="submit" disabled={!input.trim()}
-                        style={{ width: 36, height: 36, borderRadius: 10, border: "none", background: input.trim() ? C.accent : "transparent", color: input.trim() ? "#fff" : C.textMuted, cursor: input.trim() ? "pointer" : "default", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                        <ArrowUp size={18} />
-                      </button>
-                    )}
-                  </div>
-                </form>
+                {pendingQuestions.length > 0 && currentQIdx < pendingQuestions.length ? (
+                  <QuestionOverlay
+                    question={pendingQuestions[currentQIdx]}
+                    questionIndex={currentQIdx}
+                    totalQuestions={pendingQuestions.length}
+                    onSelect={handleQuestionAnswer}
+                    onSkip={handleQuestionSkip}
+                  />
+                ) : (
+                  <form onSubmit={handleSubmit}>
+                    <div style={{ background: C.bgComposer, borderRadius: 20, boxShadow: C.shadow, padding: "4px 4px 4px 18px", display: "flex", alignItems: "center", gap: 8 }}>
+                      <input value={input} onChange={e => setInput(e.target.value)} placeholder={isStreaming ? "Quant is thinking..." : "Ask about your data..."}
+                        disabled={isStreaming}
+                        style={{ flex: 1, background: "transparent", border: "none", outline: "none", color: C.text, fontSize: 14, padding: "10px 0", fontFamily: C.sans, opacity: isStreaming ? 0.5 : 1 }} />
+                      {isStreaming ? (
+                        <button type="button" onClick={stopStreaming}
+                          style={{ width: 36, height: 36, borderRadius: 10, border: "none", background: C.red, color: "#fff", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                          <Square size={14} fill="#fff" />
+                        </button>
+                      ) : (
+                        <button type="submit" disabled={!input.trim()}
+                          style={{ width: 36, height: 36, borderRadius: 10, border: "none", background: input.trim() ? C.accent : "transparent", color: input.trim() ? "#fff" : C.textMuted, cursor: input.trim() ? "pointer" : "default", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                          <ArrowUp size={18} />
+                        </button>
+                      )}
+                    </div>
+                  </form>
+                )}
               </div>
             </div>
           </div>
