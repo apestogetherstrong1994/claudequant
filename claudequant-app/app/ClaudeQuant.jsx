@@ -6,7 +6,7 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   AreaChart, Area
 } from "recharts";
-import { Upload, ChevronDown, ChevronRight, X, ArrowRight, ArrowUp, Database, BarChart2, TrendingUp, Activity, Search, FileText, Zap, PanelLeft, Plus, MoreHorizontal, Square, MessageSquare } from "lucide-react";
+import { Upload, ChevronDown, ChevronRight, X, ArrowRight, ArrowUp, Database, BarChart2, TrendingUp, Activity, Search, FileText, Zap, PanelLeft, Plus, MoreHorizontal, Square, MessageSquare, Paperclip, Image, File } from "lucide-react";
 import * as Papa from "papaparse";
 
 // ─── Design System (extracted from Claude/Cowork) ───────────────────────────
@@ -488,6 +488,46 @@ export default function ClaudeQuant() {
   const [currentQIdx, setCurrentQIdx] = useState(0);
   const [questionAnswers, setQuestionAnswers] = useState([]);
 
+  // File attachment state
+  const [attachedFiles, setAttachedFiles] = useState([]);
+  const attachRef = useRef(null);
+
+  // Accepted file types for Claude API
+  const ATTACH_ACCEPT = ".jpg,.jpeg,.png,.gif,.webp,.pdf,.txt,.csv,.md,.json,.py,.js,.ts,.html,.css";
+  const MIME_MAP = {
+    jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", gif: "image/gif", webp: "image/webp",
+    pdf: "application/pdf", txt: "text/plain", csv: "text/plain", md: "text/plain",
+    json: "text/plain", py: "text/plain", js: "text/plain", ts: "text/plain",
+    html: "text/plain", css: "text/plain",
+  };
+  const IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"]);
+
+  const handleAttachFiles = useCallback((e) => {
+    const files = Array.from(e.target.files || []);
+    files.forEach(file => {
+      const ext = file.name.split(".").pop().toLowerCase();
+      const mediaType = MIME_MAP[ext] || "text/plain";
+      const reader = new FileReader();
+      reader.onload = () => {
+        const base64 = reader.result.split(",")[1]; // strip data:...;base64, prefix
+        setAttachedFiles(prev => [...prev, {
+          name: file.name,
+          mediaType,
+          data: base64,
+          isImage: IMAGE_TYPES.has(mediaType),
+          size: file.size,
+        }]);
+      };
+      reader.readAsDataURL(file);
+    });
+    // Reset input so the same file can be re-attached
+    if (attachRef.current) attachRef.current.value = "";
+  }, []);
+
+  const removeAttachment = useCallback((idx) => {
+    setAttachedFiles(prev => prev.filter((_, i) => i !== idx));
+  }, []);
+
   const numCols = useMemo(() => getNumericCols(data), [data]);
   const allCols = useMemo(() => data?.length ? Object.keys(data[0]) : [], [data]);
 
@@ -515,25 +555,51 @@ export default function ClaudeQuant() {
   }, [welcomeInput]);
 
   // ── Stream a message to the Claude API ──
-  const streamMessage = useCallback(async (userText, existingMessages = []) => {
+  const streamMessage = useCallback(async (userText, existingMessages = [], files = []) => {
     if (!userText.trim() || isStreaming) return;
 
-    const userMsg = { role: "user", text: userText, content: userText };
+    // Build display text showing attached file names
+    const fileNames = files.length > 0 ? files.map(f => f.name).join(", ") : "";
+    const displayText = fileNames ? `${userText}\n📎 ${fileNames}` : userText;
+
+    const userMsg = { role: "user", text: displayText, content: userText, files };
     const updatedMessages = [...existingMessages, userMsg];
 
     // Add user message + empty assistant placeholder
     setMessages([...updatedMessages, { role: "assistant", text: "", isStreaming: true }]);
     setIsStreaming(true);
+    setAttachedFiles([]); // clear attachments after sending
 
     const controller = new AbortController();
     abortRef.current = controller;
 
     try {
-      // Build conversation history for API (only role + content)
-      const apiMessages = updatedMessages.map(m => ({
-        role: m.role,
-        content: m.content || m.text || "",
-      }));
+      // Build conversation history for API
+      // Messages with files get content as array of blocks
+      const apiMessages = updatedMessages.map(m => {
+        const textContent = m.content || m.text || "";
+        if (m.files && m.files.length > 0) {
+          const contentBlocks = [];
+          // Add file blocks first
+          m.files.forEach(f => {
+            if (f.isImage) {
+              contentBlocks.push({
+                type: "image",
+                source: { type: "base64", media_type: f.mediaType, data: f.data },
+              });
+            } else {
+              contentBlocks.push({
+                type: "document",
+                source: { type: "base64", media_type: f.mediaType, data: f.data },
+              });
+            }
+          });
+          // Add text block
+          contentBlocks.push({ type: "text", text: textContent });
+          return { role: m.role, content: contentBlocks };
+        }
+        return { role: m.role, content: textContent };
+      });
 
       const res = await fetch("/api/chat", {
         method: "POST",
@@ -818,13 +884,13 @@ export default function ClaudeQuant() {
     }
 
     // For everything else (open-ended questions, analysis requests, etc.) → stream from Claude API
-    streamMessage(query, messages);
+    streamMessage(query, messages, attachedFiles);
   };
 
   const handleSubmit = (e) => {
     e?.preventDefault();
-    if (input.trim() && !isStreaming) {
-      processQuery(input.trim());
+    if ((input.trim() || attachedFiles.length > 0) && !isStreaming) {
+      processQuery(input.trim() || "Please analyze the attached file(s).");
       setInput("");
     }
   };
@@ -1187,6 +1253,7 @@ export default function ClaudeQuant() {
         </div>
 
         <input ref={fileRef} type="file" accept=".csv,.tsv,.txt" onChange={handleCSV} style={{ display: "none" }} />
+        <input ref={attachRef} type="file" accept={ATTACH_ACCEPT} onChange={handleAttachFiles} multiple style={{ display: "none" }} />
 
       {!data && !conversationMode ? (
         /* ═══ WELCOME SCREEN (Cowork layout) ═══ */
@@ -1342,21 +1409,58 @@ export default function ClaudeQuant() {
                   />
                 ) : (
                   <form onSubmit={handleSubmit}>
-                    <div style={{ background: C.bgComposer, borderRadius: 20, boxShadow: C.shadow, padding: "4px 4px 4px 18px", display: "flex", alignItems: "center", gap: 8 }}>
-                      <input value={input} onChange={e => setInput(e.target.value)} placeholder={isStreaming ? "Quant is thinking..." : "Ask about your data..."}
-                        disabled={isStreaming}
-                        style={{ flex: 1, background: "transparent", border: "none", outline: "none", color: C.text, fontSize: 14, padding: "10px 0", fontFamily: C.sans, opacity: isStreaming ? 0.5 : 1 }} />
-                      {isStreaming ? (
-                        <button type="button" onClick={stopStreaming}
-                          style={{ width: 36, height: 36, borderRadius: 10, border: "none", background: C.red, color: "#fff", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                          <Square size={14} fill="#fff" />
-                        </button>
-                      ) : (
-                        <button type="submit" disabled={!input.trim()}
-                          style={{ width: 36, height: 36, borderRadius: 10, border: "none", background: input.trim() ? C.accent : "transparent", color: input.trim() ? "#fff" : C.textMuted, cursor: input.trim() ? "pointer" : "default", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                          <ArrowUp size={18} />
-                        </button>
+                    <div style={{ background: C.bgComposer, borderRadius: 20, boxShadow: C.shadow, padding: "4px 4px 4px 4px" }}>
+                      {/* Attached file chips */}
+                      {attachedFiles.length > 0 && (
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, padding: "8px 14px 4px" }}>
+                          {attachedFiles.map((f, fi) => (
+                            <div key={fi} style={{
+                              display: "flex", alignItems: "center", gap: 6, padding: "4px 8px 4px 10px",
+                              borderRadius: 8, background: "rgba(222,220,209,0.08)", border: `0.5px solid ${C.border}`,
+                              fontSize: 12, color: C.textSec, fontFamily: C.sans,
+                            }}>
+                              {f.isImage ? <Image size={12} color={C.accent} /> : <File size={12} color={C.textMuted} />}
+                              <span style={{ maxWidth: 140, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f.name}</span>
+                              <button type="button" onClick={() => removeAttachment(fi)}
+                                style={{ background: "transparent", border: "none", cursor: "pointer", padding: 0, display: "flex", color: C.textMuted }}
+                                onMouseOver={e => e.currentTarget.style.color = C.text}
+                                onMouseOut={e => e.currentTarget.style.color = C.textMuted}>
+                                <X size={12} />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
                       )}
+                      {/* Input row */}
+                      <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "0 0 0 4px" }}>
+                        <button type="button" onClick={() => attachRef.current?.click()}
+                          disabled={isStreaming}
+                          style={{
+                            width: 32, height: 32, borderRadius: 8, border: "none",
+                            background: "transparent", color: C.textMuted, cursor: isStreaming ? "default" : "pointer",
+                            display: "flex", alignItems: "center", justifyContent: "center",
+                            opacity: isStreaming ? 0.3 : 1, flexShrink: 0,
+                          }}
+                          onMouseOver={e => { if (!isStreaming) e.currentTarget.style.background = "rgba(156,154,146,0.1)"; }}
+                          onMouseOut={e => { e.currentTarget.style.background = "transparent"; }}>
+                          <Plus size={18} />
+                        </button>
+                        <input value={input} onChange={e => setInput(e.target.value)}
+                          placeholder={isStreaming ? "Quant is thinking..." : "Ask about your data..."}
+                          disabled={isStreaming}
+                          style={{ flex: 1, background: "transparent", border: "none", outline: "none", color: C.text, fontSize: 14, padding: "10px 0", fontFamily: C.sans, opacity: isStreaming ? 0.5 : 1 }} />
+                        {isStreaming ? (
+                          <button type="button" onClick={stopStreaming}
+                            style={{ width: 36, height: 36, borderRadius: 10, border: "none", background: C.red, color: "#fff", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                            <Square size={14} fill="#fff" />
+                          </button>
+                        ) : (
+                          <button type="submit" disabled={!input.trim() && attachedFiles.length === 0}
+                            style={{ width: 36, height: 36, borderRadius: 10, border: "none", background: (input.trim() || attachedFiles.length > 0) ? C.accent : "transparent", color: (input.trim() || attachedFiles.length > 0) ? "#fff" : C.textMuted, cursor: (input.trim() || attachedFiles.length > 0) ? "pointer" : "default", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                              <ArrowUp size={18} />
+                            </button>
+                        )}
+                      </div>
                     </div>
                   </form>
                 )}

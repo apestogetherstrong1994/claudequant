@@ -36,10 +36,23 @@ export async function POST(request) {
     }
 
     // Format messages for the Anthropic API
-    // Append data context to the latest user message if dataset is loaded
+    // Content can be a string OR an array of content blocks (when files are attached)
     const formattedMessages = messages.map((msg, i) => {
       let content = msg.content || msg.text || "";
-      // Attach data context to the last user message
+      // If content is an array of blocks (files + text), handle specially
+      if (Array.isArray(content)) {
+        // Append data context to the text block of the last user message
+        if (msg.role === "user" && i === messages.length - 1 && dataContext) {
+          content = content.map(block => {
+            if (block.type === "text") {
+              return { ...block, text: block.text + buildDataContext(dataContext) };
+            }
+            return block;
+          });
+        }
+        return { role: msg.role, content };
+      }
+      // String content — attach data context to the last user message
       if (msg.role === "user" && i === messages.length - 1 && dataContext) {
         content += buildDataContext(dataContext);
       }
