@@ -65,12 +65,11 @@ export async function POST(request) {
       return { role: msg.role, content };
     });
 
-    // Server-side tools: code execution, web fetch, web search
-    // Code execution runs in Anthropic's sandbox (Python, Bash, file ops)
-    // Web fetch retrieves URLs (free when paired with code execution)
+    // Server-side tools: web fetch, web search
+    // Code execution is auto-injected by the API when web_fetch/web_search are present
+    // Web fetch retrieves URLs (code execution is free when paired with it)
     // Web search finds data sources and APIs
     const tools = [
-      { type: "code_execution_20250825", name: "code_execution" },
       { type: "web_fetch_20260209", name: "web_fetch", max_uses: 10 },
       { type: "web_search_20250305", name: "web_search", max_uses: 5 },
     ];
