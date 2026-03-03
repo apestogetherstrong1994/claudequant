@@ -150,6 +150,7 @@ export default function ClaudeQuant() {
       let fullText = "";
       let toolActivity = []; // Track tool use (code exec, web fetch, web search)
       let toolInputBuffers = {}; // Buffer partial JSON for tool inputs
+      let stopReason = null;
 
       while (true) {
         const readPromise = reader.read();
@@ -251,6 +252,9 @@ export default function ClaudeQuant() {
                 return updated;
               });
 
+            } else if (d.type === "message_delta") {
+              if (d.stopReason) stopReason = d.stopReason;
+
             } else if (d.type === "error") {
               throw new Error(d.error);
             }
@@ -259,6 +263,11 @@ export default function ClaudeQuant() {
             throw parseErr;
           }
         }
+      }
+
+      // If response was truncated due to max tokens, append a notice
+      if (stopReason === "max_tokens") {
+        fullText += "\n\n---\n*Response was truncated due to length. Ask me to continue if you'd like the rest.*";
       }
 
       const parsed = parseMessageContent(fullText);

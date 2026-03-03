@@ -78,7 +78,7 @@ export async function POST(request) {
     // Stream the response using the Anthropic SDK
     const stream = await client.messages.stream({
       model: "claude-opus-4-6",
-      max_tokens: 16384,
+      max_tokens: 32768,
       system: systemBlocks,
       messages: formattedMessages,
       tools,
@@ -197,9 +197,12 @@ export async function POST(request) {
               );
 
             } else if (event.type === "message_delta") {
-              if (event.usage) {
+              const deltaData = {};
+              if (event.usage) deltaData.usage = event.usage;
+              if (event.delta?.stop_reason) deltaData.stopReason = event.delta.stop_reason;
+              if (Object.keys(deltaData).length > 0) {
                 controller.enqueue(
-                  encoder.encode(`data: ${JSON.stringify({ type: "usage", usage: event.usage })}\n\n`)
+                  encoder.encode(`data: ${JSON.stringify({ type: "message_delta", ...deltaData })}\n\n`)
                 );
               }
             }
