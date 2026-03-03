@@ -24,6 +24,7 @@ import { RightSidebar } from "@/components/layout/RightSidebar";
 import { TopBar } from "@/components/layout/TopBar";
 import { ExportMenu } from "@/components/export/ExportMenu";
 import { SkillBadge } from "@/components/chat/SkillBadge";
+import { ToolActivityBlock } from "@/components/chat/ToolActivityBlock";
 
 // ═════════════════════════════════════════════════════════════════════════════
 export default function ClaudeQuant() {
@@ -147,9 +148,10 @@ export default function ClaudeQuant() {
       const decoder = new TextDecoder();
       let buffer = "";
       let fullText = "";
+      let toolActivity = []; // Track tool use (code exec, web fetch, web search)
+      let toolInputBuffers = {}; // Buffer partial JSON for tool inputs
 
       while (true) {
-        // Timeout individual reads at 30s to prevent stuck streams (e.g. Vercel function timeout)
         const readPromise = reader.read();
         const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Stream timeout — the response was interrupted. Try again or shorten your prompt.")), 60000));
         const { done, value } = await Promise.race([readPromise, timeoutPromise]);
@@ -166,13 +168,89 @@ export default function ClaudeQuant() {
             const d = JSON.parse(payload);
             if (d.type === "start" && d.skill) {
               setActiveSkill(d.skill);
+
             } else if (d.type === "text") {
               fullText += d.text;
               setMessages(prev => {
                 const updated = [...prev];
-                updated[updated.length - 1] = { role: "assistant", text: getDisplayText(fullText), content: fullText, isStreaming: true };
+                updated[updated.length - 1] = { role: "assistant", text: getDisplayText(fullText), content: fullText, toolActivity: [...toolActivity], isStreaming: true };
                 return updated;
               });
+
+            } else if (d.type === "tool_use_start") {
+              // Claude is invoking a server tool
+              toolInputBuffers[d.index] = "";
+              toolActivity.push({
+                type: d.toolName,
+                toolId: d.toolId,
+                status: "running",
+                input: null,
+              });
+              setMessages(prev => {
+                const updated = [...prev];
+                updated[updated.length - 1] = { ...updated[updated.length - 1], toolActivity: [...toolActivity], isStreaming: true };
+                return updated;
+              });
+
+            } else if (d.type === "tool_input_delta") {
+              // Accumulate partial tool input JSON (e.g., code being written)
+              if (toolInputBuffers[d.index] !== undefined) {
+                toolInputBuffers[d.index] += d.partialJson;
+                // Try to parse and update the activity with input preview
+                try {
+                  const parsed = JSON.parse(toolInputBuffers[d.index]);
+                  const last = toolActivity[toolActivity.length - 1];
+                  if (last) last.input = parsed;
+                } catch { /* partial JSON, wait for more */ }
+              }
+
+            } else if (d.type === "code_result") {
+              // Code execution completed
+              const activity = toolActivity.find(a => a.toolId === d.toolId);
+              if (activity) {
+                activity.status = d.returnCode === 0 ? "success" : "error";
+                activity.stdout = d.stdout;
+                activity.stderr = d.stderr;
+                activity.files = d.files;
+              }
+              setMessages(prev => {
+                const updated = [...prev];
+                updated[updated.length - 1] = { ...updated[updated.length - 1], toolActivity: [...toolActivity] };
+                return updated;
+              });
+
+            } else if (d.type === "file_result") {
+              const activity = toolActivity.find(a => a.toolId === d.toolId);
+              if (activity) {
+                activity.status = "success";
+                activity.fileContent = d.content;
+              }
+
+            } else if (d.type === "web_fetch_result") {
+              const activity = toolActivity.find(a => a.toolId === d.toolId);
+              if (activity) {
+                activity.status = "success";
+                activity.url = d.url;
+                activity.title = d.title;
+              }
+              setMessages(prev => {
+                const updated = [...prev];
+                updated[updated.length - 1] = { ...updated[updated.length - 1], toolActivity: [...toolActivity] };
+                return updated;
+              });
+
+            } else if (d.type === "web_search_result") {
+              const activity = toolActivity.find(a => a.toolId === d.toolId);
+              if (activity) {
+                activity.status = "success";
+                activity.results = d.results;
+              }
+              setMessages(prev => {
+                const updated = [...prev];
+                updated[updated.length - 1] = { ...updated[updated.length - 1], toolActivity: [...toolActivity] };
+                return updated;
+              });
+
             } else if (d.type === "error") {
               throw new Error(d.error);
             }
@@ -189,7 +267,7 @@ export default function ClaudeQuant() {
 
       setMessages(prev => {
         const updated = [...prev];
-        updated[updated.length - 1] = { role: "assistant", text: cleanDisplay, content: fullText, isStreaming: false };
+        updated[updated.length - 1] = { role: "assistant", text: cleanDisplay, content: fullText, toolActivity: [...toolActivity], isStreaming: false };
         return updated;
       });
 
@@ -222,6 +300,13 @@ export default function ClaudeQuant() {
   const stopStreaming = useCallback(() => { abortRef.current?.abort(); }, []);
 
   // ── Question overlay handlers ──
+  const formatAnswers = (answers) => {
+    return answers
+      .filter(a => a.answer !== null)
+      .map(a => `**${a.title}**\n${a.answer}`)
+      .join('\n\n');
+  };
+
   const handleQuestionAnswer = useCallback((answer) => {
     const question = pendingQuestions[currentQIdx];
     const newAnswers = [...questionAnswers, { title: question.title, answer }];
@@ -229,7 +314,7 @@ export default function ClaudeQuant() {
     if (currentQIdx + 1 < pendingQuestions.length) {
       setCurrentQIdx(prev => prev + 1);
     } else {
-      const combinedText = newAnswers.filter(a => a.answer !== null).map(a => `**${a.title}**: ${a.answer}`).join('\n');
+      const combinedText = formatAnswers(newAnswers);
       setPendingQuestions([]); setCurrentQIdx(0); setQuestionAnswers([]);
       if (combinedText.trim()) streamMessage(combinedText, messages);
     }
@@ -241,7 +326,7 @@ export default function ClaudeQuant() {
     if (currentQIdx + 1 < pendingQuestions.length) {
       setCurrentQIdx(prev => prev + 1);
     } else {
-      const combinedText = newAnswers.filter(a => a.answer !== null).map(a => `**${a.title}**: ${a.answer}`).join('\n');
+      const combinedText = formatAnswers(newAnswers);
       setPendingQuestions([]); setCurrentQIdx(0); setQuestionAnswers([]);
       if (combinedText.trim()) streamMessage(combinedText, messages);
     }
@@ -418,13 +503,14 @@ export default function ClaudeQuant() {
                       ) : (
                         <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
                           <div style={{ flexShrink: 0, marginTop: 3 }}><ClaudeLogo size={18} /></div>
-                          <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ flex: 1, minWidth: 0, overflowWrap: "break-word", wordBreak: "break-word" }}>
                             {msg.text && (
                               <div style={{ fontSize: 14, lineHeight: 1.7, color: C.textSec, fontFamily: C.sans }}>
                                 {renderMarkdown(msg.text)}{msg.isStreaming && <StreamingDots />}
                               </div>
                             )}
                             {!msg.text && msg.isStreaming && <div style={{ fontSize: 14, color: C.textMuted }}><StreamingDots /></div>}
+                            {msg.toolActivity && msg.toolActivity.length > 0 && <ToolActivityBlock activities={msg.toolActivity} />}
                             {msg.isError && <div style={{ color: C.red, fontSize: 12, marginTop: 4 }}>Error occurred</div>}
                             {msg.table && <div style={{ overflowX: "auto", marginTop: 14, background: C.bgComposer, borderRadius: C.radius, boxShadow: C.shadowSoft, padding: "4px 0", border: `0.5px solid ${C.border}` }}><table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}><thead><tr>{msg.table.headers.map((h, j) => <th key={j} style={{ padding: "10px 14px", textAlign: j === 0 ? "left" : "right", color: C.textMuted, borderBottom: `1px solid ${C.border}`, fontWeight: 600, fontFamily: C.sans, fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5 }}>{h}</th>)}</tr></thead><tbody>{msg.table.rows.map((row, j) => <tr key={j}>{row.map((cell, k) => <td key={k} style={{ padding: "8px 14px", textAlign: k === 0 ? "left" : "right", color: k === 0 ? C.text : C.textSec, fontFamily: k > 0 ? C.mono : C.sans, fontSize: 12, borderBottom: j < msg.table.rows.length - 1 ? `0.5px solid rgba(255,255,255,0.04)` : "none" }}>{cell}</td>)}</tr>)}</tbody></table></div>}
                             {msg.chart && <div onClick={() => setZoomedChart(msg.chart)} style={{ marginTop: 14, background: C.bgComposer, borderRadius: C.radius, boxShadow: C.shadowSoft, padding: "16px 8px 8px 0", border: `0.5px solid ${C.border}`, cursor: "pointer", transition: C.transition }} onMouseOver={e => e.currentTarget.style.borderColor = C.borderHover} onMouseOut={e => e.currentTarget.style.borderColor = C.border}><ChartRenderer chart={msg.chart} /></div>}

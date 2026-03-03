@@ -65,16 +65,23 @@ export async function POST(request) {
       return { role: msg.role, content };
     });
 
+    // Server-side tools: code execution, web fetch, web search
+    // Code execution runs in Anthropic's sandbox (Python, Bash, file ops)
+    // Web fetch retrieves URLs (free when paired with code execution)
+    // Web search finds data sources and APIs
+    const tools = [
+      { type: "code_execution_20250825", name: "code_execution" },
+      { type: "web_fetch_20260209", name: "web_fetch", max_uses: 10 },
+      { type: "web_search_20250305", name: "web_search", max_uses: 5 },
+    ];
+
     // Stream the response using the Anthropic SDK
-    // - Model upgraded to Claude Opus 4.6
-    // - System prompt as array with cache_control breakpoints
-    // - Code execution tool enabled
-    // - Max tokens increased to 16384
     const stream = await client.messages.stream({
       model: "claude-opus-4-6",
       max_tokens: 16384,
       system: systemBlocks,
       messages: formattedMessages,
+      tools,
     });
 
     // Create a ReadableStream that sends Server-Sent Events
@@ -83,31 +90,112 @@ export async function POST(request) {
       async start(controller) {
         try {
           for await (const event of stream) {
-            if (event.type === "content_block_delta") {
-              const text = event.delta?.text || "";
-              if (text) {
+            if (event.type === "content_block_start") {
+              const block = event.content_block;
+
+              // Server tool use (code execution, web fetch, web search)
+              if (block?.type === "server_tool_use") {
                 controller.enqueue(
-                  encoder.encode(`data: ${JSON.stringify({ type: "text", text })}\n\n`)
+                  encoder.encode(`data: ${JSON.stringify({
+                    type: "tool_use_start",
+                    index: event.index,
+                    toolName: block.name,
+                    toolId: block.id,
+                  })}\n\n`)
                 );
               }
+
+              // Code execution result
+              if (block?.type === "bash_code_execution_tool_result") {
+                const result = block.content;
+                controller.enqueue(
+                  encoder.encode(`data: ${JSON.stringify({
+                    type: "code_result",
+                    toolId: block.tool_use_id,
+                    stdout: result?.stdout || "",
+                    stderr: result?.stderr || "",
+                    returnCode: result?.return_code,
+                    // Include file references if present
+                    files: result?.content?.filter?.(f => f.file_id) || [],
+                  })}\n\n`)
+                );
+              }
+
+              // Text editor result (file operations)
+              if (block?.type === "text_editor_code_execution_tool_result") {
+                controller.enqueue(
+                  encoder.encode(`data: ${JSON.stringify({
+                    type: "file_result",
+                    toolId: block.tool_use_id,
+                    content: block.content,
+                  })}\n\n`)
+                );
+              }
+
+              // Web fetch result
+              if (block?.type === "web_fetch_tool_result") {
+                const result = block.content;
+                controller.enqueue(
+                  encoder.encode(`data: ${JSON.stringify({
+                    type: "web_fetch_result",
+                    toolId: block.tool_use_id,
+                    url: result?.url || "",
+                    title: result?.content?.title || "",
+                  })}\n\n`)
+                );
+              }
+
+              // Web search result
+              if (block?.type === "web_search_tool_result") {
+                const results = block.content;
+                controller.enqueue(
+                  encoder.encode(`data: ${JSON.stringify({
+                    type: "web_search_result",
+                    toolId: block.tool_use_id,
+                    results: Array.isArray(results) ? results.map(r => ({
+                      title: r.title,
+                      url: r.url,
+                    })).slice(0, 5) : [],
+                  })}\n\n`)
+                );
+              }
+
+            } else if (event.type === "content_block_delta") {
+              // Text content
+              if (event.delta?.text) {
+                controller.enqueue(
+                  encoder.encode(`data: ${JSON.stringify({ type: "text", text: event.delta.text })}\n\n`)
+                );
+              }
+              // Tool input being streamed (e.g., code being written)
+              if (event.delta?.type === "input_json_delta" && event.delta?.partial_json) {
+                controller.enqueue(
+                  encoder.encode(`data: ${JSON.stringify({
+                    type: "tool_input_delta",
+                    index: event.index,
+                    partialJson: event.delta.partial_json,
+                  })}\n\n`)
+                );
+              }
+
             } else if (event.type === "message_start") {
-              // Include skill info and cache usage in the start event
               const startData = {
                 type: "start",
                 model: event.message?.model,
                 skill: skill ? { id: skill.id, name: skill.name } : null,
               };
-              // Include cache usage stats if available
               if (event.message?.usage) {
                 startData.usage = event.message.usage;
               }
               controller.enqueue(
                 encoder.encode(`data: ${JSON.stringify(startData)}\n\n`)
               );
+
             } else if (event.type === "message_stop") {
               controller.enqueue(
                 encoder.encode(`data: ${JSON.stringify({ type: "stop" })}\n\n`)
               );
+
             } else if (event.type === "message_delta") {
               if (event.usage) {
                 controller.enqueue(
