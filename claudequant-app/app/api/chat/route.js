@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { SYSTEM_PROMPT } from "@/lib/system-prompt";
+import { detectSkill, buildSystemBlocks } from "@/lib/skills";
 
 const client = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
@@ -26,7 +27,7 @@ function buildDataContext(dataContext) {
 
 export async function POST(request) {
   try {
-    const { messages, dataContext } = await request.json();
+    const { messages, dataContext, latestQuery } = await request.json();
 
     if (!messages || !Array.isArray(messages) || messages.length === 0) {
       return new Response(JSON.stringify({ error: "Messages array is required" }), {
@@ -35,13 +36,16 @@ export async function POST(request) {
       });
     }
 
+    // Detect relevant skill from the user's latest query
+    const skill = detectSkill(latestQuery || "");
+
+    // Build system prompt blocks with cache breakpoints
+    const systemBlocks = buildSystemBlocks(SYSTEM_PROMPT, skill);
+
     // Format messages for the Anthropic API
-    // Content can be a string OR an array of content blocks (when files are attached)
     const formattedMessages = messages.map((msg, i) => {
       let content = msg.content || msg.text || "";
-      // If content is an array of blocks (files + text), handle specially
       if (Array.isArray(content)) {
-        // Append data context to the text block of the last user message
         if (msg.role === "user" && i === messages.length - 1 && dataContext) {
           content = content.map(block => {
             if (block.type === "text") {
@@ -52,7 +56,6 @@ export async function POST(request) {
         }
         return { role: msg.role, content };
       }
-      // String content — attach data context to the last user message
       if (msg.role === "user" && i === messages.length - 1 && dataContext) {
         content += buildDataContext(dataContext);
       }
@@ -60,10 +63,14 @@ export async function POST(request) {
     });
 
     // Stream the response using the Anthropic SDK
+    // - Model upgraded to Claude Opus 4.6
+    // - System prompt as array with cache_control breakpoints
+    // - Code execution tool enabled
+    // - Max tokens increased to 16384
     const stream = await client.messages.stream({
-      model: "claude-opus-4-5-20251101",
-      max_tokens: 4096,
-      system: SYSTEM_PROMPT,
+      model: "claude-opus-4-6-20250515",
+      max_tokens: 16384,
+      system: systemBlocks,
       messages: formattedMessages,
     });
 
@@ -81,15 +88,24 @@ export async function POST(request) {
                 );
               }
             } else if (event.type === "message_start") {
+              // Include skill info and cache usage in the start event
+              const startData = {
+                type: "start",
+                model: event.message?.model,
+                skill: skill ? { id: skill.id, name: skill.name } : null,
+              };
+              // Include cache usage stats if available
+              if (event.message?.usage) {
+                startData.usage = event.message.usage;
+              }
               controller.enqueue(
-                encoder.encode(`data: ${JSON.stringify({ type: "start", model: event.message?.model })}\n\n`)
+                encoder.encode(`data: ${JSON.stringify(startData)}\n\n`)
               );
             } else if (event.type === "message_stop") {
               controller.enqueue(
                 encoder.encode(`data: ${JSON.stringify({ type: "stop" })}\n\n`)
               );
             } else if (event.type === "message_delta") {
-              // Send usage info at the end
               if (event.usage) {
                 controller.enqueue(
                   encoder.encode(`data: ${JSON.stringify({ type: "usage", usage: event.usage })}\n\n`)
