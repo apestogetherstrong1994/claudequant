@@ -68,7 +68,7 @@ export async function POST(request) {
     // - Code execution tool enabled
     // - Max tokens increased to 16384
     const stream = await client.messages.stream({
-      model: "claude-opus-4-6-20250515",
+      model: "claude-opus-4-6",
       max_tokens: 16384,
       system: systemBlocks,
       messages: formattedMessages,
