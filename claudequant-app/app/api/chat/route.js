@@ -2,6 +2,9 @@ import Anthropic from "@anthropic-ai/sdk";
 import { SYSTEM_PROMPT } from "@/lib/system-prompt";
 import { detectSkill, buildSystemBlocks } from "@/lib/skills";
 
+// Allow up to 60s for streaming responses (Vercel Pro), Hobby plan caps at 10s
+export const maxDuration = 60;
+
 const client = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
 });

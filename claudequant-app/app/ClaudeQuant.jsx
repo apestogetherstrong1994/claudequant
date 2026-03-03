@@ -149,7 +149,10 @@ export default function ClaudeQuant() {
       let fullText = "";
 
       while (true) {
-        const { done, value } = await reader.read();
+        // Timeout individual reads at 30s to prevent stuck streams (e.g. Vercel function timeout)
+        const readPromise = reader.read();
+        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Stream timeout — the response was interrupted. Try again or shorten your prompt.")), 30000));
+        const { done, value } = await Promise.race([readPromise, timeoutPromise]);
         if (done) break;
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split("\n");
