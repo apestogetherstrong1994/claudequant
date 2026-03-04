@@ -21,8 +21,8 @@ function buildDataContext(dataContext) {
     }
   }
   if (sampleRows && sampleRows.length > 0) {
-    ctx += `\nSample rows (first 5):\n`;
-    ctx += JSON.stringify(sampleRows.slice(0, 5), null, 2);
+    ctx += `\nSample rows (first 3):\n`;
+    ctx += JSON.stringify(sampleRows.slice(0, 3));
   }
   ctx += `\n[/DATA CONTEXT]`;
   return ctx;
@@ -45,11 +45,23 @@ export async function POST(request) {
     // Build system prompt blocks with cache breakpoints
     const systemBlocks = buildSystemBlocks(SYSTEM_PROMPT, skill);
 
+    // Conversation windowing: only send last 10 messages to reduce token usage
+    // This keeps us within the free-tier rate limit (10K input tokens/min)
+    const MAX_MESSAGES = 10;
+    const windowedMessages = messages.length > MAX_MESSAGES
+      ? messages.slice(-MAX_MESSAGES)
+      : messages;
+
+    // Ensure conversation starts with a user message (API requirement)
+    const trimmedMessages = windowedMessages[0]?.role === "assistant"
+      ? windowedMessages.slice(1)
+      : windowedMessages;
+
     // Format messages for the Anthropic API
-    const formattedMessages = messages.map((msg, i) => {
+    const formattedMessages = trimmedMessages.map((msg, i) => {
       let content = msg.content || msg.text || "";
       if (Array.isArray(content)) {
-        if (msg.role === "user" && i === messages.length - 1 && dataContext) {
+        if (msg.role === "user" && i === trimmedMessages.length - 1 && dataContext) {
           content = content.map(block => {
             if (block.type === "text") {
               return { ...block, text: block.text + buildDataContext(dataContext) };
@@ -59,7 +71,7 @@ export async function POST(request) {
         }
         return { role: msg.role, content };
       }
-      if (msg.role === "user" && i === messages.length - 1 && dataContext) {
+      if (msg.role === "user" && i === trimmedMessages.length - 1 && dataContext) {
         content += buildDataContext(dataContext);
       }
       return { role: msg.role, content };
