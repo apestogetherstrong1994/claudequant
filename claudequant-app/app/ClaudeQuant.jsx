@@ -8,6 +8,7 @@ import * as Papa from "papaparse";
 import { C } from "@/components/design-system";
 import { mean, median, std, corr, linReg, getNumericCols, fmt } from "@/lib/stats";
 import { genExperiment, genPilot, genRetention } from "@/lib/data-generators";
+import { PROMPTS } from "@/lib/prompts";
 import { parseMessageContent, getDisplayText } from "@/components/questions/QuestionParser";
 
 // ─── Components ─────────────────────────────────────────────────────────────
@@ -40,6 +41,7 @@ export default function ClaudeQuant() {
   const scrollRef = useRef(null);
   const fileRef = useRef(null);
   const abortRef = useRef(null);
+  const pendingAutoSendRef = useRef(null); // { prompt, msgs } for auto-send after dataset load
 
   // ── Question overlay state ──
   const [pendingQuestions, setPendingQuestions] = useState([]);
@@ -60,6 +62,15 @@ export default function ClaudeQuant() {
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [messages]);
+
+  // ── Auto-send prompt after dataset load (fires once data settles) ──
+  useEffect(() => {
+    if (pendingAutoSendRef.current && data && !isStreaming) {
+      const { prompt, msgs } = pendingAutoSendRef.current;
+      pendingAutoSendRef.current = null;
+      streamMessage(prompt, msgs);
+    }
+  }, [data, isStreaming, streamMessage]);
 
   // ── Build data context for API calls ──
   function buildDataContext(d, name) {
@@ -280,7 +291,7 @@ export default function ClaudeQuant() {
     return msgs;
   };
 
-  const loadDataset = (type) => {
+  const loadDataset = (type, promptKey) => {
     let d, name;
     if (type === "experiment") {
       d = genExperiment(); name = "A/B Test: Signup Flow Experiment";
@@ -289,7 +300,11 @@ export default function ClaudeQuant() {
     } else {
       d = genRetention(); name = "SaaS Product Retention Data";
     }
-    setData(d); setDsName(name); setMessages(buildInitialAnalysis(d, name));
+    const msgs = buildInitialAnalysis(d, name);
+    setData(d); setDsName(name); setMessages(msgs);
+    if (promptKey && PROMPTS[promptKey]) {
+      pendingAutoSendRef.current = { prompt: PROMPTS[promptKey], msgs };
+    }
   };
 
   const handleCSV = (e) => {
@@ -382,7 +397,7 @@ export default function ClaudeQuant() {
             onUploadCSV={() => fileRef.current?.click()}
             onTaskCard={(key) => {
               const datasetMap = { experiment: "experiment", design: "pilot", explore: "retention" };
-              loadDataset(datasetMap[key] || "experiment");
+              loadDataset(datasetMap[key] || "experiment", key);
             }}
           />
         ) : (

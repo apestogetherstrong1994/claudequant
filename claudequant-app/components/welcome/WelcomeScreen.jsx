@@ -5,7 +5,6 @@ import { Upload, ArrowRight } from "lucide-react";
 import { C } from "../design-system";
 import { ClaudeLogo } from "../icons/ClaudeLogo";
 import { CardIcon1, CardIcon2, CardIcon3 } from "../icons/CardIcons";
-import { PROMPTS } from "@/lib/prompts";
 
 export function WelcomeScreen({ welcomeInput, setWelcomeInput, onSubmit, onUploadCSV, onTaskCard }) {
   const welcomeRef = useRef(null);
@@ -33,8 +32,6 @@ export function WelcomeScreen({ welcomeInput, setWelcomeInput, onSubmit, onUploa
   }, [welcomeInput]);
 
   const handleTaskCard = (promptKey) => {
-    setWelcomeInput(PROMPTS[promptKey] || "");
-    setTimeout(() => welcomeRef.current?.focus(), 50);
     onTaskCard?.(promptKey);
   };
 
