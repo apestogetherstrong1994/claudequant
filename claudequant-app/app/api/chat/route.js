@@ -70,8 +70,7 @@ export async function POST(request) {
       return { role: msg.role, content };
     });
 
-    // Server-side tools: web fetch, web search
-    // Stream the response using the Anthropic SDK
+    // Stream the response using the Anthropic SDK (text-only, no tools)
     const stream = await client.messages.stream({
       model: "claude-opus-4-6",
       max_tokens: 32768,
@@ -85,91 +84,11 @@ export async function POST(request) {
       async start(controller) {
         try {
           for await (const event of stream) {
-            if (event.type === "content_block_start") {
-              const block = event.content_block;
-
-              // Server tool use (code execution, web fetch, web search)
-              if (block?.type === "server_tool_use") {
-                controller.enqueue(
-                  encoder.encode(`data: ${JSON.stringify({
-                    type: "tool_use_start",
-                    index: event.index,
-                    toolName: block.name,
-                    toolId: block.id,
-                  })}\n\n`)
-                );
-              }
-
-              // Code execution result
-              if (block?.type === "bash_code_execution_tool_result") {
-                const result = block.content;
-                controller.enqueue(
-                  encoder.encode(`data: ${JSON.stringify({
-                    type: "code_result",
-                    toolId: block.tool_use_id,
-                    stdout: result?.stdout || "",
-                    stderr: result?.stderr || "",
-                    returnCode: result?.return_code,
-                    // Include file references if present
-                    files: result?.content?.filter?.(f => f.file_id) || [],
-                  })}\n\n`)
-                );
-              }
-
-              // Text editor result (file operations)
-              if (block?.type === "text_editor_code_execution_tool_result") {
-                controller.enqueue(
-                  encoder.encode(`data: ${JSON.stringify({
-                    type: "file_result",
-                    toolId: block.tool_use_id,
-                    content: block.content,
-                  })}\n\n`)
-                );
-              }
-
-              // Web fetch result
-              if (block?.type === "web_fetch_tool_result") {
-                const result = block.content;
-                controller.enqueue(
-                  encoder.encode(`data: ${JSON.stringify({
-                    type: "web_fetch_result",
-                    toolId: block.tool_use_id,
-                    url: result?.url || "",
-                    title: result?.content?.title || "",
-                  })}\n\n`)
-                );
-              }
-
-              // Web search result
-              if (block?.type === "web_search_tool_result") {
-                const results = block.content;
-                controller.enqueue(
-                  encoder.encode(`data: ${JSON.stringify({
-                    type: "web_search_result",
-                    toolId: block.tool_use_id,
-                    results: Array.isArray(results) ? results.map(r => ({
-                      title: r.title,
-                      url: r.url,
-                    })).slice(0, 5) : [],
-                  })}\n\n`)
-                );
-              }
-
-            } else if (event.type === "content_block_delta") {
+            if (event.type === "content_block_delta") {
               // Text content
               if (event.delta?.text) {
                 controller.enqueue(
                   encoder.encode(`data: ${JSON.stringify({ type: "text", text: event.delta.text })}\n\n`)
-                );
-              }
-              // Tool input being streamed (e.g., code being written)
-              if (event.delta?.type === "input_json_delta" && event.delta?.partial_json) {
-                controller.enqueue(
-                  encoder.encode(`data: ${JSON.stringify({
-                    type: "tool_input_delta",
-                    index: event.index,
-                    partialJson: event.delta.partial_json,
-                  })}\n\n`)
                 );
               }
 
