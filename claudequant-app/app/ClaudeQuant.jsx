@@ -99,12 +99,13 @@ export default function ClaudeQuant() {
   }
 
   // ── Stream a message to the Claude API ──
-  const streamMessage = useCallback(async (userText, existingMessages = [], files = []) => {
+  const streamMessage = useCallback(async (userText, existingMessages = [], files = [], qaData = null) => {
     if (!userText.trim() || isStreaming) return;
 
     const fileNames = files.length > 0 ? files.map(f => f.name).join(", ") : "";
     const displayText = fileNames ? `${userText}\n📎 ${fileNames}` : userText;
     const userMsg = { role: "user", text: displayText, content: userText, files };
+    if (qaData) userMsg.qaData = qaData;
     const updatedMessages = [...existingMessages, userMsg];
 
     setMessages([...updatedMessages, { role: "assistant", text: "", isStreaming: true }]);
@@ -312,8 +313,8 @@ export default function ClaudeQuant() {
   const formatAnswers = (answers) => {
     return answers
       .filter(a => a.answer !== null)
-      .map(a => `**${a.title}**\n${a.answer}`)
-      .join('\n\n');
+      .map(a => `${a.title}: ${a.answer}`)
+      .join('\n');
   };
 
   const handleQuestionAnswer = useCallback((answer) => {
@@ -324,8 +325,9 @@ export default function ClaudeQuant() {
       setCurrentQIdx(prev => prev + 1);
     } else {
       const combinedText = formatAnswers(newAnswers);
+      const answered = newAnswers.filter(a => a.answer !== null);
       setPendingQuestions([]); setCurrentQIdx(0); setQuestionAnswers([]);
-      if (combinedText.trim()) streamMessage(combinedText, messages);
+      if (combinedText.trim()) streamMessage(combinedText, messages, [], answered);
     }
   }, [pendingQuestions, currentQIdx, questionAnswers, messages, streamMessage]);
 
@@ -336,8 +338,9 @@ export default function ClaudeQuant() {
       setCurrentQIdx(prev => prev + 1);
     } else {
       const combinedText = formatAnswers(newAnswers);
+      const answered = newAnswers.filter(a => a.answer !== null);
       setPendingQuestions([]); setCurrentQIdx(0); setQuestionAnswers([]);
-      if (combinedText.trim()) streamMessage(combinedText, messages);
+      if (combinedText.trim()) streamMessage(combinedText, messages, [], answered);
     }
   }, [pendingQuestions, currentQIdx, questionAnswers, messages, streamMessage]);
 
@@ -506,7 +509,18 @@ export default function ClaudeQuant() {
                       {msg.role === "user" ? (
                         <div style={{ display: "flex", justifyContent: "flex-end", animation: "fadeIn 0.2s ease" }}>
                           <div style={{ maxWidth: "75%", background: C.bgComposer, borderRadius: 20, padding: "10px 16px", border: `0.5px solid ${C.border}` }}>
-                            <div style={{ fontSize: 14, lineHeight: 1.6, color: C.text, fontFamily: C.sans }}>{msg.text}</div>
+                            {msg.qaData ? (
+                              <div style={{ fontSize: 14, lineHeight: 1.8, color: C.text, fontFamily: C.sans }}>
+                                {msg.qaData.map((qa, qi) => (
+                                  <div key={qi} style={{ marginBottom: qi < msg.qaData.length - 1 ? 6 : 0 }}>
+                                    <span style={{ fontWeight: 600 }}>{qa.title}: </span>
+                                    <span style={{ color: C.textSec }}>{qa.answer}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <div style={{ fontSize: 14, lineHeight: 1.6, color: C.text, fontFamily: C.sans }}>{msg.text}</div>
+                            )}
                           </div>
                         </div>
                       ) : (
