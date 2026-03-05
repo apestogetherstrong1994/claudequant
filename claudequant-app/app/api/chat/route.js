@@ -1,6 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { SYSTEM_PROMPT } from "@/lib/system-prompt";
-import { detectSkill, buildSystemBlocks } from "@/lib/skills";
 
 // Allow up to 60s for streaming responses (Vercel Pro), Hobby plan caps at 10s
 export const maxDuration = 60;
@@ -30,7 +29,7 @@ function buildDataContext(dataContext) {
 
 export async function POST(request) {
   try {
-    const { messages, dataContext, latestQuery } = await request.json();
+    const { messages, dataContext } = await request.json();
 
     if (!messages || !Array.isArray(messages) || messages.length === 0) {
       return new Response(JSON.stringify({ error: "Messages array is required" }), {
@@ -38,12 +37,6 @@ export async function POST(request) {
         headers: { "Content-Type": "application/json" },
       });
     }
-
-    // Detect relevant skill from the user's latest query
-    const skill = detectSkill(latestQuery || "");
-
-    // Build system prompt blocks with cache breakpoints
-    const systemBlocks = buildSystemBlocks(SYSTEM_PROMPT, skill);
 
     // Conversation windowing: only send last 10 messages to reduce token usage
     // This keeps us within the free-tier rate limit (10K input tokens/min)
@@ -90,7 +83,7 @@ export async function POST(request) {
     const stream = await client.messages.stream({
       model: "claude-sonnet-4-5-20250929",
       max_tokens: 32768,
-      system: systemBlocks,
+      system: SYSTEM_PROMPT,
       messages: formattedMessages,
       tools,
     });
@@ -193,7 +186,6 @@ export async function POST(request) {
               const startData = {
                 type: "start",
                 model: event.message?.model,
-                skill: skill ? { id: skill.id, name: skill.name } : null,
               };
               if (event.message?.usage) {
                 startData.usage = event.message.usage;
