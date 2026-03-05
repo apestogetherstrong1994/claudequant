@@ -9,7 +9,7 @@ import { C } from "@/components/design-system";
 import { mean, median, std, corr, linReg, getNumericCols, fmt } from "@/lib/stats";
 import { genExperiment, genPilot, genRetention } from "@/lib/data-generators";
 import { PROMPTS } from "@/lib/prompts";
-import { parseMessageContent, getDisplayText } from "@/components/questions/QuestionParser";
+import { parseMessageContent, getDisplayText, extractHypotheses } from "@/components/questions/QuestionParser";
 
 // ─── Components ─────────────────────────────────────────────────────────────
 import { ClaudeLogo } from "@/components/icons/ClaudeLogo";
@@ -33,7 +33,7 @@ export default function ClaudeQuant() {
   const [input, setInput] = useState("");
   const [welcomeInput, setWelcomeInput] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [expanded, setExpanded] = useState({ info: true, vars: true, actions: true });
+  const [expanded, setExpanded] = useState({ info: true, vars: true, actions: true, hypotheses: true });
   const [conversationMode, setConversationMode] = useState(false);
   const [isStreaming, setIsStreaming] = useState(false);
 
@@ -50,6 +50,9 @@ export default function ClaudeQuant() {
 
   // ── File attachment state ──
   const [attachedFiles, setAttachedFiles] = useState([]);
+
+  // ── Hypothesis tracker state ──
+  const [hypotheses, setHypotheses] = useState([]);
 
   // ── UI state ──
   const [zoomedChart, setZoomedChart] = useState(null);
@@ -184,6 +187,12 @@ export default function ClaudeQuant() {
         return updated;
       });
 
+      // Extract hypotheses for sidebar tracker
+      const newHypotheses = extractHypotheses(fullText);
+      if (newHypotheses.length > 0) {
+        setHypotheses(prev => [...prev, ...newHypotheses.map(h => ({ text: h, status: "proposed" }))]);
+      }
+
       if (questions.length > 0) {
         setPendingQuestions(questions);
         setCurrentQIdx(0);
@@ -220,6 +229,11 @@ export default function ClaudeQuant() {
   }, [data, isStreaming, streamMessage]);
 
   const stopStreaming = useCallback(() => { abortRef.current?.abort(); }, []);
+
+  // ── Hypothesis status cycling ──
+  const handleHypothesisStatusChange = useCallback((index, newStatus) => {
+    setHypotheses(prev => prev.map((h, i) => i === index ? { ...h, status: newStatus } : h));
+  }, []);
 
   // ── Question overlay handlers ──
   const formatAnswers = (answers) => {
@@ -502,6 +516,8 @@ export default function ClaudeQuant() {
                 expanded={expanded}
                 setExpanded={setExpanded}
                 processQuery={processQuery}
+                hypotheses={hypotheses}
+                onHypothesisStatusChange={handleHypothesisStatusChange}
               />
             )}
           </div>

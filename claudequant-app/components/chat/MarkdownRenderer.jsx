@@ -132,6 +132,27 @@ export const renderMarkdown = (text) => {
       continue;
     }
 
+    // Insight card
+    const insightMatch = line.match(/^\[INSIGHT_DISPLAY\](.*)\[\/INSIGHT_DISPLAY\]$/);
+    if (insightMatch) {
+      elements.push(
+        <div key={elKey++} style={{
+          margin: "16px 0", padding: "14px 16px",
+          borderRadius: C.radius,
+          background: C.accentSoft,
+          borderLeft: `3px solid ${C.accent}`,
+          display: "flex", gap: 10, alignItems: "flex-start",
+        }}>
+          <span style={{ fontSize: 15, flexShrink: 0, marginTop: 1 }}>🔍</span>
+          <div style={{ flex: 1, fontSize: 14, lineHeight: 1.65, color: C.text, fontFamily: C.sans, fontWeight: 500 }}>
+            {renderInline(insightMatch[1].trim(), `insight-${elKey}`)}
+          </div>
+        </div>
+      );
+      i++;
+      continue;
+    }
+
     // Heading
     const headingMatch = line.match(/^(#{1,4})\s+(.+)/);
     if (headingMatch) {

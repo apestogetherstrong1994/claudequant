@@ -1,9 +1,14 @@
-// ─── Pre-clean: strip code fences that wrap [QUESTION] blocks ────────────────
+// ─── Pre-clean: strip code fences that wrap structured blocks ─────────────────
 export function preCleanQuestionText(text) {
   if (!text) return text;
   let clean = text.replace(/```\s*\n?\s*\[QUESTION\]/g, '[QUESTION]');
   clean = clean.replace(/\[\/QUESTION\]\s*\n?\s*```/g, '[/QUESTION]');
   clean = clean.replace(/```[\s\S]*?\[QUESTION\]/g, '[QUESTION]');
+  // Also clean insight/hypothesis code fences
+  clean = clean.replace(/```\s*\n?\s*\[INSIGHT\]/g, '[INSIGHT]');
+  clean = clean.replace(/\[\/INSIGHT\]\s*\n?\s*```/g, '[/INSIGHT]');
+  clean = clean.replace(/```\s*\n?\s*\[HYPOTHESIS\]/g, '[HYPOTHESIS]');
+  clean = clean.replace(/\[\/HYPOTHESIS\]\s*\n?\s*```/g, '[/HYPOTHESIS]');
   return clean;
 }
 
@@ -56,21 +61,49 @@ export function parseMessageContent(text) {
   return { segments, hasQuestions };
 }
 
-// ─── Strip [QUESTION] blocks for clean display during streaming ─────────────
+// ─── Extract hypotheses from Claude's response for sidebar tracker ───────────
+export function extractHypotheses(text) {
+  if (!text) return [];
+  const cleaned = preCleanQuestionText(text);
+  const hypotheses = [];
+  const regex = /\[HYPOTHESIS\]\s*([\s\S]*?)\s*\[\/HYPOTHESIS\]/g;
+  let match;
+  while ((match = regex.exec(cleaned)) !== null) {
+    const h = match[1].trim();
+    if (h) hypotheses.push(h);
+  }
+  return hypotheses;
+}
+
+// ─── Strip structured blocks for clean display during streaming ──────────────
 export function getDisplayText(text) {
   if (!text) return '';
-  const cleaned = preCleanQuestionText(text);
-  const idx = cleaned.search(/\[QUESTION\]/);
-  if (idx !== -1) {
-    return cleaned.slice(0, idx).replace(/\s*[-]{3,}\s*$/, '').trim();
+  let result = preCleanQuestionText(text);
+
+  // Convert [INSIGHT] blocks to single-line display markers
+  result = result.replace(
+    /\[INSIGHT\]\s*([\s\S]*?)\s*\[\/INSIGHT\]/g,
+    (_, content) => `\n[INSIGHT_DISPLAY]${content.replace(/\n/g, ' ').trim()}[/INSIGHT_DISPLAY]\n`
+  );
+
+  // Strip [HYPOTHESIS] blocks entirely (displayed in sidebar)
+  result = result.replace(/\[HYPOTHESIS\]\s*[\s\S]*?\s*\[\/HYPOTHESIS\]/g, '');
+
+  // Strip everything from first [QUESTION] onward
+  const qIdx = result.search(/\[QUESTION\]/);
+  if (qIdx !== -1) {
+    result = result.slice(0, qIdx).replace(/\s*[-]{3,}\s*$/, '');
   }
-  const partialIdx = cleaned.search(/\[Q(?:U(?:E(?:S(?:T(?:I(?:O(?:N)?)?)?)?)?)?)?$/);
-  if (partialIdx !== -1) {
-    return cleaned.slice(0, partialIdx).trim();
+
+  // Strip partial structured tags at end during streaming
+  result = result.replace(/\[(?:QUESTION|INSIGHT|HYPOTHESIS|INSIGHT_DISPLAY|\/INSIGHT_DISPLAY|\/INSIGHT|\/HYPOTHESIS|\/QUESTION)[^\]]*$/, '');
+  result = result.replace(/\[[A-Z\/]{0,20}$/, '');
+
+  // Strip trailing code fence fragments
+  const fenceIdx = result.search(/```\s*$/);
+  if (fenceIdx !== -1 && result.length - fenceIdx < 10) {
+    result = result.slice(0, fenceIdx);
   }
-  const fenceIdx = cleaned.search(/```\s*$/);
-  if (fenceIdx !== -1 && cleaned.length - fenceIdx < 10) {
-    return cleaned.slice(0, fenceIdx).trim();
-  }
-  return cleaned;
+
+  return result.trim();
 }
