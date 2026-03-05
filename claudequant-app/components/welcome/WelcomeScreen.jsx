@@ -1,10 +1,10 @@
 "use client";
 
 import { useRef, useEffect } from "react";
-import { Upload, ArrowRight, ChevronDown } from "lucide-react";
+import { Upload, ArrowRight } from "lucide-react";
 import { C } from "../design-system";
 import { ClaudeLogo } from "../icons/ClaudeLogo";
-import { CardIcon1, CardIcon2, CardIcon3, CardIcon4 } from "../icons/CardIcons";
+import { CardIcon1, CardIcon2, CardIcon3 } from "../icons/CardIcons";
 import { PROMPTS } from "@/lib/prompts";
 
 export function WelcomeScreen({ welcomeInput, setWelcomeInput, onSubmit, onUploadCSV, onTaskCard }) {
@@ -50,35 +50,23 @@ export function WelcomeScreen({ welcomeInput, setWelcomeInput, onSubmit, onUploa
         Find the story hidden in the numbers
       </h1>
 
-      {/* Info banner */}
-      <div style={{ background: C.bgComposer, borderRadius: 16, border: `0.5px solid ${C.border}`, padding: "16px 20px", marginBottom: 24, display: "flex", alignItems: "flex-start", gap: 12, boxShadow: C.shadowSoft }}>
-        <svg width="18" height="18" viewBox="0 0 20 20" fill="none" style={{ flexShrink: 0, marginTop: 1 }}>
-          <path d="M10 2L2 18h16L10 2z" stroke={C.textMuted} strokeWidth="1.2" fill="none" />
-          <path d="M10 8v4M10 14v1" stroke={C.textMuted} strokeWidth="1.5" strokeLinecap="round" />
-        </svg>
-        <span style={{ color: C.textSec, fontSize: 14, lineHeight: 1.5 }}>
-          ClaudeQuant is an early product prototype. Quant acts as a PhD-level data scientist, helping you understand the world through the past (e.g., design experiments, analyze data statistically rigorously) and predict the future through that understanding (e.g., extrapolate models, build algorithmic or probabilistic predictors). Upload a CSV or any quantitative dataset and Claude will work with you to find the story hidden in the numbers.
-        </span>
-      </div>
-
       {/* Task cards section */}
       <div ref={cardsRef} style={{ background: C.bgComposer, borderRadius: 16, border: `0.5px solid ${C.border}`, padding: "20px 24px", marginBottom: 24, boxShadow: C.shadowSoft }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M4 6l4-4 4 4M4 10l4 4 4-4" stroke={C.textMuted} strokeWidth="1.2" strokeLinecap="round" /></svg>
-            <span style={{ color: C.text, fontSize: 14, fontWeight: 500 }}>What will you discover?</span>
+            <span style={{ color: C.text, fontSize: 14, fontWeight: 500 }}>Start a conversation</span>
           </div>
           <button onClick={onUploadCSV} style={{ background: "transparent", border: "none", color: C.textMuted, cursor: "pointer", fontSize: 13, fontFamily: C.sans, display: "flex", alignItems: "center", gap: 4 }}
             onMouseOver={e => e.currentTarget.style.color = C.textSec} onMouseOut={e => e.currentTarget.style.color = C.textMuted}>
             + Upload your own
           </button>
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
           {[
-            { icon: <CardIcon1 />, label: "Trade the market quantitatively", sub: "Backtest strategies, analyze equities, build signals", action: () => handleTaskCard("trade") },
-            { icon: <CardIcon2 />, label: "Analyze experimental data", sub: "Statistical tests, significance, effect sizes", action: () => handleTaskCard("experiment") },
-            { icon: <CardIcon3 />, label: "Design experiments to test hypotheses", sub: "Power analysis, sample sizes, controls", action: () => handleTaskCard("design") },
-            { icon: <CardIcon4 />, label: "Predict the weather", sub: "Time series, forecasting, probabilistic models", action: () => handleTaskCard("weather") },
+            { icon: <CardIcon1 />, label: "Was this A/B test real?", sub: "Check for significance, effect sizes, and hidden biases", action: () => handleTaskCard("experiment") },
+            { icon: <CardIcon2 />, label: "Does this intervention work?", sub: "Evaluate a pilot study for causal evidence", action: () => handleTaskCard("design") },
+            { icon: <CardIcon3 />, label: "What's driving this metric?", sub: "Find the story hidden in the numbers", action: () => handleTaskCard("explore") },
           ].map((card, i) => (
             <button key={i} onClick={card.action}
               style={{ display: "flex", alignItems: "center", gap: 12, padding: "14px 16px", borderRadius: 12, border: `0.5px solid ${C.border}`, background: C.bg, cursor: "pointer", textAlign: "left", transition: "all 0.15s", fontFamily: C.sans }}
@@ -99,30 +87,27 @@ export function WelcomeScreen({ welcomeInput, setWelcomeInput, onSubmit, onUploa
           <div style={{ background: C.bgComposer, borderRadius: 20, boxShadow: C.shadow, padding: "16px 20px 12px" }}>
             <textarea ref={welcomeRef} value={welcomeInput} onChange={e => setWelcomeInput(e.target.value)}
               onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSubmit(e); } }}
-              placeholder="Describe your data analysis goal..."
+              placeholder="Ask about your data, or pick a scenario above..."
               rows={1}
               style={{ width: "100%", background: "transparent", border: "none", outline: "none", color: C.text, fontSize: 14, padding: 0, marginBottom: 12, fontFamily: C.sans, lineHeight: 1.6, resize: "none", overflow: "hidden" }} />
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
                 <button type="button" onClick={onUploadCSV} style={{ display: "flex", alignItems: "center", gap: 6, background: "transparent", border: "none", color: C.textMuted, cursor: "pointer", fontSize: 13, fontFamily: C.sans }}>
                   <Upload size={14} /> Upload CSV
-                  <ChevronDown size={12} />
                 </button>
-                <span style={{ color: C.textMuted, fontSize: 16, cursor: "pointer" }}>+</span>
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                <span style={{ color: C.textMuted, fontSize: 13, fontFamily: C.sans }}>Powered by Claude <ChevronDown size={11} style={{ display: "inline", verticalAlign: "middle" }} /></span>
                 <button type="submit"
-                  style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 18px", borderRadius: 20, border: "none", background: C.accent, color: "#fff", cursor: "pointer", fontSize: 14, fontWeight: 500, fontFamily: C.sans, transition: "background 0.15s" }}
+                  style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 36, height: 36, borderRadius: 18, border: "none", background: C.accent, color: "#fff", cursor: "pointer", transition: "background 0.15s" }}
                   onMouseOver={e => e.currentTarget.style.background = C.accentHover} onMouseOut={e => e.currentTarget.style.background = C.accent}>
-                  Let's crunch! <ArrowRight size={15} />
+                  <ArrowRight size={18} />
                 </button>
               </div>
             </div>
           </div>
         </form>
         <div style={{ textAlign: "center", padding: "8px 0 0", fontSize: 12, color: C.textMuted, fontFamily: C.sans }}>
-          Claude is AI and can make mistakes. Please double-check responses. <span style={{ textDecoration: "underline", cursor: "pointer" }}>Give us feedback</span>
+          Claude is AI and can make mistakes. Please double-check responses.
         </div>
       </div>
     </div>

@@ -24,7 +24,7 @@ const jetbrainsMono = JetBrains_Mono({
 
 export const metadata = {
   title: "ClaudeQuant — Find the story hidden in the numbers",
-  description: "A PhD-level data scientist powered by Claude. Analyze data, design experiments, backtest strategies, and forecast the future.",
+  description: "A PhD-level data scientist powered by Claude. Design experiments, analyze results, and find the story hidden in your data.",
 };
 
 export default function RootLayout({ children }) {

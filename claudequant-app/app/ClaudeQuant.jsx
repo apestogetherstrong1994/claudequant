@@ -7,7 +7,7 @@ import * as Papa from "papaparse";
 // ─── Design system & extracted modules ──────────────────────────────────────
 import { C } from "@/components/design-system";
 import { mean, median, std, corr, linReg, getNumericCols, fmt } from "@/lib/stats";
-import { genStocks, genResearch } from "@/lib/data-generators";
+import { genExperiment, genPilot, genRetention } from "@/lib/data-generators";
 import { parseMessageContent, getDisplayText } from "@/components/questions/QuestionParser";
 
 // ─── Components ─────────────────────────────────────────────────────────────
@@ -19,12 +19,9 @@ import { ChartZoomModal } from "@/components/charts/ChartZoomModal";
 import { QuestionOverlay } from "@/components/questions/QuestionOverlay";
 import { Composer } from "@/components/composer/Composer";
 import { WelcomeScreen } from "@/components/welcome/WelcomeScreen";
-import { LeftSidebar } from "@/components/layout/LeftSidebar";
 import { RightSidebar } from "@/components/layout/RightSidebar";
 import { TopBar } from "@/components/layout/TopBar";
 import { ExportMenu } from "@/components/export/ExportMenu";
-import { SkillBadge } from "@/components/chat/SkillBadge";
-import { ToolActivityBlock } from "@/components/chat/ToolActivityBlock";
 
 // ═════════════════════════════════════════════════════════════════════════════
 export default function ClaudeQuant() {
@@ -38,22 +35,6 @@ export default function ClaudeQuant() {
   const [expanded, setExpanded] = useState({ info: true, vars: true, actions: true });
   const [conversationMode, setConversationMode] = useState(false);
   const [isStreaming, setIsStreaming] = useState(false);
-  const [navOpen, setNavOpen] = useState(true);
-  const [activeSession, setActiveSession] = useState("current");
-  const [sessions] = useState([
-    { id: "current", title: "Craft Anthropic dream job applicat...", active: true },
-    { id: "s2", title: "Backtest momentum strategy on S&P..." },
-    { id: "s3", title: "Analyze A/B test results for signu..." },
-    { id: "s4", title: "Design RCT for drug trial sample s..." },
-    { id: "s5", title: "Predict Bay Area rainfall patterns..." },
-    { id: "s6", title: "Correlation analysis on student GP..." },
-    { id: "s7", title: "Portfolio optimization with min va..." },
-    { id: "s8", title: "Power analysis for clinical endpoi..." },
-    { id: "s9", title: "Polymarket election model vs. poll..." },
-    { id: "s10", title: "Outlier detection in sensor readin..." },
-    { id: "s11", title: "ARIMA forecast for quarterly reven..." },
-    { id: "s12", title: "Experiment design for pricing stra..." },
-  ]);
 
   // ── Refs ──
   const scrollRef = useRef(null);
@@ -68,8 +49,7 @@ export default function ClaudeQuant() {
   // ── File attachment state ──
   const [attachedFiles, setAttachedFiles] = useState([]);
 
-  // ── UI polish state ──
-  const [activeSkill, setActiveSkill] = useState(null);
+  // ── UI state ──
   const [zoomedChart, setZoomedChart] = useState(null);
 
   // ── Derived state ──
@@ -103,7 +83,7 @@ export default function ClaudeQuant() {
     if (!userText.trim() || isStreaming) return;
 
     const fileNames = files.length > 0 ? files.map(f => f.name).join(", ") : "";
-    const displayText = fileNames ? `${userText}\n📎 ${fileNames}` : userText;
+    const displayText = fileNames ? `${userText}\n\u{1F4CE} ${fileNames}` : userText;
     const userMsg = { role: "user", text: displayText, content: userText, files };
     if (qaData) userMsg.qaData = qaData;
     const updatedMessages = [...existingMessages, userMsg];
@@ -149,13 +129,11 @@ export default function ClaudeQuant() {
       const decoder = new TextDecoder();
       let buffer = "";
       let fullText = "";
-      let toolActivity = []; // Track tool use (code exec, web fetch, web search)
-      let toolInputBuffers = {}; // Buffer partial JSON for tool inputs
       let stopReason = null;
 
       while (true) {
         const readPromise = reader.read();
-        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Stream timeout — the response was interrupted. Try again or shorten your prompt.")), 60000));
+        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Stream timeout \u2014 the response was interrupted. Try again or shorten your prompt.")), 60000));
         const { done, value } = await Promise.race([readPromise, timeoutPromise]);
         if (done) break;
         buffer += decoder.decode(value, { stream: true });
@@ -168,88 +146,11 @@ export default function ClaudeQuant() {
           if (payload === "[DONE]") break;
           try {
             const d = JSON.parse(payload);
-            if (d.type === "start" && d.skill) {
-              setActiveSkill(d.skill);
-
-            } else if (d.type === "text") {
+            if (d.type === "text") {
               fullText += d.text;
               setMessages(prev => {
                 const updated = [...prev];
-                updated[updated.length - 1] = { role: "assistant", text: getDisplayText(fullText), content: fullText, toolActivity: [...toolActivity], isStreaming: true };
-                return updated;
-              });
-
-            } else if (d.type === "tool_use_start") {
-              // Claude is invoking a server tool
-              toolInputBuffers[d.index] = "";
-              toolActivity.push({
-                type: d.toolName,
-                toolId: d.toolId,
-                status: "running",
-                input: null,
-              });
-              setMessages(prev => {
-                const updated = [...prev];
-                updated[updated.length - 1] = { ...updated[updated.length - 1], toolActivity: [...toolActivity], isStreaming: true };
-                return updated;
-              });
-
-            } else if (d.type === "tool_input_delta") {
-              // Accumulate partial tool input JSON (e.g., code being written)
-              if (toolInputBuffers[d.index] !== undefined) {
-                toolInputBuffers[d.index] += d.partialJson;
-                // Try to parse and update the activity with input preview
-                try {
-                  const parsed = JSON.parse(toolInputBuffers[d.index]);
-                  const last = toolActivity[toolActivity.length - 1];
-                  if (last) last.input = parsed;
-                } catch { /* partial JSON, wait for more */ }
-              }
-
-            } else if (d.type === "code_result") {
-              // Code execution completed
-              const activity = toolActivity.find(a => a.toolId === d.toolId);
-              if (activity) {
-                activity.status = d.returnCode === 0 ? "success" : "error";
-                activity.stdout = d.stdout;
-                activity.stderr = d.stderr;
-                activity.files = d.files;
-              }
-              setMessages(prev => {
-                const updated = [...prev];
-                updated[updated.length - 1] = { ...updated[updated.length - 1], toolActivity: [...toolActivity] };
-                return updated;
-              });
-
-            } else if (d.type === "file_result") {
-              const activity = toolActivity.find(a => a.toolId === d.toolId);
-              if (activity) {
-                activity.status = "success";
-                activity.fileContent = d.content;
-              }
-
-            } else if (d.type === "web_fetch_result") {
-              const activity = toolActivity.find(a => a.toolId === d.toolId);
-              if (activity) {
-                activity.status = "success";
-                activity.url = d.url;
-                activity.title = d.title;
-              }
-              setMessages(prev => {
-                const updated = [...prev];
-                updated[updated.length - 1] = { ...updated[updated.length - 1], toolActivity: [...toolActivity] };
-                return updated;
-              });
-
-            } else if (d.type === "web_search_result") {
-              const activity = toolActivity.find(a => a.toolId === d.toolId);
-              if (activity) {
-                activity.status = "success";
-                activity.results = d.results;
-              }
-              setMessages(prev => {
-                const updated = [...prev];
-                updated[updated.length - 1] = { ...updated[updated.length - 1], toolActivity: [...toolActivity] };
+                updated[updated.length - 1] = { role: "assistant", text: getDisplayText(fullText), content: fullText, isStreaming: true };
                 return updated;
               });
 
@@ -277,7 +178,7 @@ export default function ClaudeQuant() {
 
       setMessages(prev => {
         const updated = [...prev];
-        updated[updated.length - 1] = { role: "assistant", text: cleanDisplay, content: fullText, toolActivity: [...toolActivity], isStreaming: false };
+        updated[updated.length - 1] = { role: "assistant", text: cleanDisplay, content: fullText, isStreaming: false };
         return updated;
       });
 
@@ -348,7 +249,7 @@ export default function ClaudeQuant() {
   const buildInitialAnalysis = (d, name) => {
     const nc = getNumericCols(d);
     const msgs = [];
-    msgs.push({ role: "assistant", text: `I've loaded **${name}** — ${d.length} rows and ${Object.keys(d[0]).length} columns. Let me run an initial analysis.` });
+    msgs.push({ role: "assistant", text: `I've loaded **${name}** \u2014 ${d.length} rows and ${Object.keys(d[0]).length} columns. Let me run an initial analysis.` });
     const stats = nc.map(c => {
       const vals = d.map(r => r[c]).filter(v => v != null && !isNaN(v));
       return { col: c, mean: mean(vals), median: median(vals), std: std(vals), min: Math.min(...vals), max: Math.max(...vals) };
@@ -366,7 +267,7 @@ export default function ClaudeQuant() {
       const top = pairs.slice(0, 3);
       if (top.length) {
         const s = top[0], dir = s.r > 0 ? "positive" : "negative";
-        msgs.push({ role: "assistant", text: `**Key correlation:** **${s.a}** and **${s.b}** (r = ${s.r.toFixed(3)}, ${dir}).`, chip: top.map(p => `${p.a} ↔ ${p.b}: ${p.r.toFixed(2)}`) });
+        msgs.push({ role: "assistant", text: `**Key correlation:** **${s.a}** and **${s.b}** (r = ${s.r.toFixed(3)}, ${dir}).`, chip: top.map(p => `${p.a} \u2194 ${p.b}: ${p.r.toFixed(2)}`) });
       }
     }
     const hasDate = Object.keys(d[0]).some(k => k.toLowerCase().includes("date"));
@@ -380,8 +281,14 @@ export default function ClaudeQuant() {
   };
 
   const loadDataset = (type) => {
-    const d = type === "stocks" ? genStocks() : genResearch();
-    const name = type === "stocks" ? "Market Data (AAPL, GOOGL, MSFT, SPY)" : "Student Research Data";
+    let d, name;
+    if (type === "experiment") {
+      d = genExperiment(); name = "A/B Test: Signup Flow Experiment";
+    } else if (type === "pilot") {
+      d = genPilot(); name = "Wellness Program Pilot Study";
+    } else {
+      d = genRetention(); name = "SaaS Product Retention Data";
+    }
     setData(d); setDsName(name); setMessages(buildInitialAnalysis(d, name));
   };
 
@@ -398,8 +305,6 @@ export default function ClaudeQuant() {
   const processQuery = (query) => {
     const q = query.toLowerCase();
     if (q.includes("upload a csv") || q.includes("upload csv")) { fileRef.current?.click(); return; }
-    if (q.includes("sample data") || q.includes("market equities") || q.includes("load market")) { loadDataset("stocks"); return; }
-    if (q.includes("research study") || q.includes("load research")) { loadDataset("research"); return; }
 
     if (data) {
       const nc = getNumericCols(data);
@@ -418,11 +323,11 @@ export default function ClaudeQuant() {
         const vals = data.map(r => r[col]).filter(v => v != null && !isNaN(v));
         const mn = Math.min(...vals), mx = Math.max(...vals), bins = 12, bw = (mx - mn) / bins || 1;
         const hist = Array.from({ length: bins }, (_, i) => { const lo = mn + i * bw, hi = lo + bw; return { range: `${lo.toFixed(1)}`, count: vals.filter(v => v >= lo && (i === bins - 1 ? v <= hi : v < hi)).length }; });
-        setMessages(prev => [...prev, { role: "user", text: query }, { role: "assistant", text: `Distribution of **${col}** — mean: ${fmt(mean(vals))}, std: ${fmt(std(vals))}`, chart: { type: "bar", data: hist, x: "range", y: "count" } }]);
+        setMessages(prev => [...prev, { role: "user", text: query }, { role: "assistant", text: `Distribution of **${col}** \u2014 mean: ${fmt(mean(vals))}, std: ${fmt(std(vals))}`, chart: { type: "bar", data: hist, x: "range", y: "count" } }]);
         return;
       } else if (q.includes("scatter") || q.includes("relationship") || q.includes(" vs ") || q.includes("versus")) {
         const cx = mentioned[0] || nc[0], cy = mentioned[1] || nc[1];
-        if (cx && cy) { const r = corr(data.map(d => d[cx]).filter(v => !isNaN(v)), data.map(d => d[cy]).filter(v => !isNaN(v))); setMessages(prev => [...prev, { role: "user", text: query }, { role: "assistant", text: `**${cx}** vs **${cy}** — r = ${r.toFixed(3)}`, chart: { type: "scatter", data, x: cx, y: cy } }]); }
+        if (cx && cy) { const r = corr(data.map(d => d[cx]).filter(v => !isNaN(v)), data.map(d => d[cy]).filter(v => !isNaN(v))); setMessages(prev => [...prev, { role: "user", text: query }, { role: "assistant", text: `**${cx}** vs **${cy}** \u2014 r = ${r.toFixed(3)}`, chart: { type: "scatter", data, x: cx, y: cy } }]); }
         return;
       } else if (q.includes("trend") || q.includes("time") || q.includes("line") || q.includes("over time")) {
         const keys = mentioned.length ? mentioned : nc.filter(c => !c.toLowerCase().includes("volume") && !c.toLowerCase().includes("id")).slice(0, 4);
@@ -433,7 +338,7 @@ export default function ClaudeQuant() {
         const vx = data.map(r => r[predictor]).filter(v => !isNaN(v)), vy = data.map(r => r[target]).filter(v => !isNaN(v));
         const minLen = Math.min(vx.length, vy.length), reg = linReg(vx.slice(0, minLen), vy.slice(0, minLen));
         const predData = data.map(r => ({ ...r, predicted: +(reg.intercept + reg.slope * r[predictor]).toFixed(2) }));
-        setMessages(prev => [...prev, { role: "user", text: query }, { role: "assistant", text: `**Regression:** ${target} = ${reg.slope.toFixed(4)} × ${predictor} + ${reg.intercept.toFixed(2)}\nR² = ${reg.r2.toFixed(4)}`, chart: { type: "regression", data: predData, x: predictor, y: target, predicted: "predicted" } }]);
+        setMessages(prev => [...prev, { role: "user", text: query }, { role: "assistant", text: `**Regression:** ${target} = ${reg.slope.toFixed(4)} \u00D7 ${predictor} + ${reg.intercept.toFixed(2)}\nR\u00B2 = ${reg.r2.toFixed(4)}`, chart: { type: "regression", data: predData, x: predictor, y: target, predicted: "predicted" } }]);
         return;
       } else if (q.includes("compar") || q.includes("all") || q.includes("overview") || q.includes("summary")) {
         const stats = nc.map(c => { const vals = data.map(r => r[c]).filter(v => v != null && !isNaN(v)); return { col: c, mean: mean(vals), median: median(vals), std: std(vals), min: Math.min(...vals), max: Math.max(...vals) }; });
@@ -442,7 +347,7 @@ export default function ClaudeQuant() {
       } else if (q.includes("outlier") || q.includes("anomal")) {
         const col = mentioned[0] || nc[0], vals = data.map(r => r[col]).filter(v => !isNaN(v));
         const m = mean(vals), s = std(vals), outliers = data.filter(r => Math.abs(r[col] - m) > 2 * s);
-        setMessages(prev => [...prev, { role: "user", text: query }, { role: "assistant", text: `**Outlier detection for ${col}** (±2σ): ${outliers.length} outlier${outliers.length !== 1 ? "s" : ""} / ${data.length} observations.` }]);
+        setMessages(prev => [...prev, { role: "user", text: query }, { role: "assistant", text: `**Outlier detection for ${col}** (\u00B12\u03C3): ${outliers.length} outlier${outliers.length !== 1 ? "s" : ""} / ${data.length} observations.` }]);
         return;
       }
     }
@@ -451,7 +356,7 @@ export default function ClaudeQuant() {
   };
 
   const handleWelcomeSubmit = (prompt) => {
-    if (!prompt) { loadDataset("stocks"); return; }
+    if (!prompt) { loadDataset("experiment"); return; }
     setConversationMode(true);
     setWelcomeInput("");
     streamMessage(prompt, []);
@@ -463,11 +368,9 @@ export default function ClaudeQuant() {
       {/* Chart zoom modal */}
       {zoomedChart && <ChartZoomModal chart={zoomedChart} onClose={() => setZoomedChart(null)} />}
 
-      <LeftSidebar navOpen={navOpen} setNavOpen={setNavOpen} sessions={sessions} activeSession={activeSession} setActiveSession={setActiveSession} />
-
       <div style={{ flex: 1, display: "flex", flexDirection: "column", position: "relative", overflow: "hidden", minWidth: 0 }}>
         <div style={{ position: "absolute", inset: 0, backgroundImage: C.grid, backgroundSize: "32px 32px", pointerEvents: "none", zIndex: 0 }} />
-        <TopBar navOpen={navOpen} setNavOpen={setNavOpen} />
+        <TopBar />
 
         <input ref={fileRef} type="file" accept=".csv,.tsv,.txt" onChange={handleCSV} style={{ display: "none" }} />
 
@@ -477,6 +380,10 @@ export default function ClaudeQuant() {
             setWelcomeInput={setWelcomeInput}
             onSubmit={handleWelcomeSubmit}
             onUploadCSV={() => fileRef.current?.click()}
+            onTaskCard={(key) => {
+              const datasetMap = { experiment: "experiment", design: "pilot", explore: "retention" };
+              loadDataset(datasetMap[key] || "experiment");
+            }}
           />
         ) : (
           <div style={{ position: "relative", zIndex: 1, display: "flex", flex: 1, overflow: "hidden" }}>
@@ -486,7 +393,6 @@ export default function ClaudeQuant() {
                 <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                   <ClaudeLogo size={22} />
                   <span style={{ fontSize: 16, fontWeight: 500, letterSpacing: -0.3 }}>Claude<span style={{ fontWeight: 300, color: C.accent }}>Quant</span></span>
-                  <SkillBadge skill={activeSkill} />
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                   <button onClick={() => fileRef.current?.click()} style={{ padding: "5px 12px", borderRadius: C.radiusSm, border: `0.5px solid ${C.border}`, background: "transparent", color: C.textSec, cursor: "pointer", fontSize: 13, display: "flex", alignItems: "center", gap: 6, fontFamily: C.sans, transition: C.transitionFast }}
@@ -533,7 +439,6 @@ export default function ClaudeQuant() {
                               </div>
                             )}
                             {!msg.text && msg.isStreaming && <div style={{ fontSize: 14, color: C.textMuted }}><StreamingDots /></div>}
-                            {msg.toolActivity && msg.toolActivity.length > 0 && <ToolActivityBlock activities={msg.toolActivity} />}
                             {msg.isError && <div style={{ color: C.red, fontSize: 12, marginTop: 4 }}>Error occurred</div>}
                             {msg.table && <div style={{ overflowX: "auto", marginTop: 14, background: C.bgComposer, borderRadius: C.radius, boxShadow: C.shadowSoft, padding: "4px 0", border: `0.5px solid ${C.border}` }}><table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}><thead><tr>{msg.table.headers.map((h, j) => <th key={j} style={{ padding: "10px 14px", textAlign: j === 0 ? "left" : "right", color: C.textMuted, borderBottom: `1px solid ${C.border}`, fontWeight: 600, fontFamily: C.sans, fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5 }}>{h}</th>)}</tr></thead><tbody>{msg.table.rows.map((row, j) => <tr key={j}>{row.map((cell, k) => <td key={k} style={{ padding: "8px 14px", textAlign: k === 0 ? "left" : "right", color: k === 0 ? C.text : C.textSec, fontFamily: k > 0 ? C.mono : C.sans, fontSize: 12, borderBottom: j < msg.table.rows.length - 1 ? `0.5px solid rgba(255,255,255,0.04)` : "none" }}>{cell}</td>)}</tr>)}</tbody></table></div>}
                             {msg.chart && <div onClick={() => setZoomedChart(msg.chart)} style={{ marginTop: 14, background: C.bgComposer, borderRadius: C.radius, boxShadow: C.shadowSoft, padding: "16px 8px 8px 0", border: `0.5px solid ${C.border}`, cursor: "pointer", transition: C.transition }} onMouseOver={e => e.currentTarget.style.borderColor = C.borderHover} onMouseOut={e => e.currentTarget.style.borderColor = C.border}><ChartRenderer chart={msg.chart} /></div>}

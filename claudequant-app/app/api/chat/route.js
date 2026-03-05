@@ -73,7 +73,7 @@ export async function POST(request) {
     // Stream the response using the Anthropic SDK (text-only, no tools)
     const stream = await client.messages.stream({
       model: "claude-opus-4-6",
-      max_tokens: 32768,
+      max_tokens: 8192,
       system: SYSTEM_PROMPT,
       messages: formattedMessages,
     });
