@@ -71,21 +71,12 @@ export async function POST(request) {
     });
 
     // Server-side tools: web fetch, web search
-    // Code execution is auto-injected by the API when web_fetch/web_search are present
-    // Web fetch retrieves URLs (code execution is free when paired with it)
-    // Web search finds data sources and APIs
-    const tools = [
-      { type: "web_fetch_20260209", name: "web_fetch", max_uses: 10 },
-      { type: "web_search_20250305", name: "web_search", max_uses: 5 },
-    ];
-
     // Stream the response using the Anthropic SDK
     const stream = await client.messages.stream({
-      model: "claude-sonnet-4-5-20250929",
+      model: "claude-opus-4-6",
       max_tokens: 32768,
       system: SYSTEM_PROMPT,
       messages: formattedMessages,
-      tools,
     });
 
     // Create a ReadableStream that sends Server-Sent Events
