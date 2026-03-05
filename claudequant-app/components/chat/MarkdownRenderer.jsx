@@ -71,7 +71,10 @@ export const renderInline = (text, keyPrefix = "") => {
 // ─── Block-level markdown renderer ──────────────────────────────────────────
 export const renderMarkdown = (text) => {
   if (!text) return null;
-  const lines = text.split("\n");
+  // Strip any hallucinated <tool_call> blocks that Claude may output as text
+  const cleaned = text.replace(/<tool_call>[\s\S]*?<\/tool_call>/g, "").trim();
+  if (!cleaned) return null;
+  const lines = cleaned.split("\n");
   const elements = [];
   let i = 0;
   let elKey = 0;
