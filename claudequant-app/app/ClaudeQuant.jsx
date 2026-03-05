@@ -63,15 +63,6 @@ export default function ClaudeQuant() {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [messages]);
 
-  // ── Auto-send prompt after dataset load (fires once data settles) ──
-  useEffect(() => {
-    if (pendingAutoSendRef.current && data && !isStreaming) {
-      const { prompt, msgs } = pendingAutoSendRef.current;
-      pendingAutoSendRef.current = null;
-      streamMessage(prompt, msgs);
-    }
-  }, [data, isStreaming, streamMessage]);
-
   // ── Build data context for API calls ──
   function buildDataContext(d, name) {
     if (!d || !d.length) return null;
@@ -218,6 +209,15 @@ export default function ClaudeQuant() {
       abortRef.current = null;
     }
   }, [isStreaming, data, dsName]);
+
+  // ── Auto-send prompt after dataset load (fires once data settles) ──
+  useEffect(() => {
+    if (pendingAutoSendRef.current && data && !isStreaming) {
+      const { prompt, msgs } = pendingAutoSendRef.current;
+      pendingAutoSendRef.current = null;
+      streamMessage(prompt, msgs);
+    }
+  }, [data, isStreaming, streamMessage]);
 
   const stopStreaming = useCallback(() => { abortRef.current?.abort(); }, []);
 
